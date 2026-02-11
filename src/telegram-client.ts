@@ -5,6 +5,9 @@
  * Does NOT call Claude directly - that's handled by queue-processor
  *
  * Setup: Create a bot via @BotFather on Telegram to get a bot token.
+ *
+ * Whitelist: Set TELEGRAM_ALLOWED_USERS and/or TELEGRAM_ALLOWED_GROUPS in .env
+ *            as comma-separated numeric IDs. If both are empty, all messages are accepted.
  */
 
 import TelegramBot from 'node-telegram-bot-api';
@@ -29,6 +32,32 @@ const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 if (!TELEGRAM_BOT_TOKEN || TELEGRAM_BOT_TOKEN === 'your_token_here') {
     console.error('ERROR: TELEGRAM_BOT_TOKEN is not set in .env file');
     process.exit(1);
+}
+
+// Whitelist: comma-separated user IDs and group chat IDs
+// If both are empty, all messages are accepted (open mode)
+function parseIdList(envVar: string | undefined): Set<number> {
+    if (!envVar || envVar.trim() === '') return new Set();
+    return new Set(
+        envVar.split(',').map(id => parseInt(id.trim(), 10)).filter(id => !isNaN(id))
+    );
+}
+
+const ALLOWED_USERS = parseIdList(process.env.TELEGRAM_ALLOWED_USERS);
+const ALLOWED_GROUPS = parseIdList(process.env.TELEGRAM_ALLOWED_GROUPS);
+const WHITELIST_ENABLED = ALLOWED_USERS.size > 0 || ALLOWED_GROUPS.size > 0;
+
+function isAllowed(msg: TelegramBot.Message): boolean {
+    if (!WHITELIST_ENABLED) return true;
+
+    const isGroup = msg.chat.type === 'group' || msg.chat.type === 'supergroup';
+
+    if (isGroup) {
+        return ALLOWED_GROUPS.has(msg.chat.id);
+    }
+
+    // Private chat: check user ID
+    return msg.from ? ALLOWED_USERS.has(msg.from.id) : false;
 }
 
 interface PendingMessage {
@@ -107,6 +136,12 @@ const bot = new TelegramBot(TELEGRAM_BOT_TOKEN, { polling: true });
 // Bot ready
 bot.getMe().then((me) => {
     log('INFO', `Telegram bot connected as @${me.username}`);
+    if (WHITELIST_ENABLED) {
+        if (ALLOWED_USERS.size > 0) log('INFO', `Whitelisted users: ${[...ALLOWED_USERS].join(', ')}`);
+        if (ALLOWED_GROUPS.size > 0) log('INFO', `Whitelisted groups: ${[...ALLOWED_GROUPS].join(', ')}`);
+    } else {
+        log('WARN', 'No whitelist configured — accepting messages from everyone');
+    }
     log('INFO', 'Listening for messages...');
 }).catch((err) => {
     log('ERROR', `Failed to connect: ${err.message}`);
@@ -121,8 +156,14 @@ bot.on('message', async (msg) => {
             return;
         }
 
-        // Skip group/channel messages - only handle private chats
-        if (msg.chat.type !== 'private') {
+        // Skip channel messages
+        if (msg.chat.type === 'channel') {
+            return;
+        }
+
+        // Whitelist check
+        if (!isAllowed(msg)) {
+            log('WARN', `Blocked message from user=${msg.from?.id} chat=${msg.chat.id} (not whitelisted)`);
             return;
         }
 

@@ -190,8 +190,12 @@ start_daemon() {
         fi
     done
 
-    # Write tokens to .env for the Node.js clients
+    # Write tokens to .env for the Node.js clients (preserving user-added vars)
     local env_file="$SCRIPT_DIR/.env"
+    local preserved=""
+    if [ -f "$env_file" ]; then
+        preserved=$(grep -vE "^(TELEGRAM_BOT_TOKEN|DISCORD_BOT_TOKEN|WHATSAPP_BOT_TOKEN)=" "$env_file" | grep -v "^$")
+    fi
     : > "$env_file"
     for ch in "${ACTIVE_CHANNELS[@]}"; do
         local env_var="${CHANNEL_TOKEN_ENV[$ch]:-}"
@@ -199,6 +203,9 @@ start_daemon() {
             echo "${env_var}=${CHANNEL_TOKENS[$ch]}" >> "$env_file"
         fi
     done
+    if [ -n "$preserved" ]; then
+        echo "$preserved" >> "$env_file"
+    fi
 
     # Report channels
     echo -e "${BLUE}Channels:${NC}"
