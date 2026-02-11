@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # TinyClaw - Main daemon using tmux + claude -c -p + messaging channels
 #
 # To add a new channel:
@@ -6,6 +6,25 @@
 #   2. Add the channel ID to ALL_CHANNELS below
 #   3. Fill in the CHANNEL_* registry arrays
 #   4. Run setup wizard to enable it
+
+# Check bash version (need 4.0+ for associative arrays)
+if [ "${BASH_VERSINFO[0]}" -lt 4 ]; then
+    echo "Error: This script requires bash 4.0 or higher (you have ${BASH_VERSION})"
+    echo ""
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        echo "macOS ships with bash 3.2. Install a newer version:"
+        echo "  brew install bash"
+        echo ""
+        echo "Then either:"
+        echo "  1. Run with: /opt/homebrew/bin/bash $0"
+        echo "  2. Add to your PATH: export PATH=\"/opt/homebrew/bin:\$PATH\""
+    else
+        echo "Install bash 4.0+ using your package manager:"
+        echo "  Ubuntu/Debian: sudo apt-get install bash"
+        echo "  CentOS/RHEL: sudo yum install bash"
+    fi
+    exit 1
+fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TMUX_SESSION="tinyclaw"
@@ -63,22 +82,32 @@ load_settings() {
         return 1
     fi
 
-    # Read channels (comma-separated list)
-    local channels_csv
-    channels_csv=$(grep -o '"channels"[[:space:]]*:[[:space:]]*"[^"]*"' "$SETTINGS_FILE" | cut -d'"' -f4)
+    # Check if jq is available for JSON parsing
+    if ! command -v jq &> /dev/null; then
+        echo -e "${RED}Error: jq is required for parsing settings${NC}"
+        echo "Install with: brew install jq (macOS) or apt-get install jq (Linux)"
+        return 1
+    fi
 
-    if [ -z "$channels_csv" ]; then
+    # Read enabled channels array
+    local channels_json
+    channels_json=$(jq -r '.channels.enabled[]' "$SETTINGS_FILE" 2>/dev/null)
+
+    if [ -z "$channels_json" ]; then
         return 1
     fi
 
     # Parse into array
-    IFS=',' read -ra ACTIVE_CHANNELS <<< "$channels_csv"
+    ACTIVE_CHANNELS=()
+    while IFS= read -r ch; do
+        ACTIVE_CHANNELS+=("$ch")
+    done <<< "$channels_json"
 
-    # Load tokens for each channel
+    # Load tokens for each channel from nested structure
     for ch in "${ALL_CHANNELS[@]}"; do
         local token_key="${CHANNEL_TOKEN_KEY[$ch]:-}"
         if [ -n "$token_key" ]; then
-            CHANNEL_TOKENS[$ch]=$(grep -o "\"${token_key}\"[[:space:]]*:[[:space:]]*\"[^\"]*\"" "$SETTINGS_FILE" | cut -d'"' -f4)
+            CHANNEL_TOKENS[$ch]=$(jq -r ".channels.${ch}.bot_token // empty" "$SETTINGS_FILE" 2>/dev/null)
         fi
     done
 
@@ -390,12 +419,14 @@ status_daemon() {
         echo -e "Heartbeat:       ${RED}Not Running${NC}"
     fi
 
-    # Recent activity per channel
+    # Recent activity per channel (only show if log file exists)
     for ch in "${ALL_CHANNELS[@]}"; do
-        echo ""
-        echo "Recent ${CHANNEL_DISPLAY[$ch]} Activity:"
-        printf '%0.s─' {1..24}; echo ""
-        tail -n 5 "$LOG_DIR/${ch}.log" 2>/dev/null || echo "  No ${CHANNEL_DISPLAY[$ch]} activity yet"
+        if [ -f "$LOG_DIR/${ch}.log" ]; then
+            echo ""
+            echo "Recent ${CHANNEL_DISPLAY[$ch]} Activity:"
+            printf '%0.s─' {1..24}; echo ""
+            tail -n 5 "$LOG_DIR/${ch}.log"
+        fi
     done
 
     echo ""
@@ -523,11 +554,106 @@ case "${1:-}" in
             exit 1
         fi
         ;;
+    provider)
+        if [ -z "$2" ]; then
+            if [ -f "$SETTINGS_FILE" ]; then
+                CURRENT_PROVIDER=$(jq -r '.models.provider // "anthropic"' "$SETTINGS_FILE" 2>/dev/null)
+                if [ "$CURRENT_PROVIDER" = "openai" ]; then
+                    CURRENT_MODEL=$(jq -r '.models.openai.model // empty' "$SETTINGS_FILE" 2>/dev/null)
+                else
+                    CURRENT_MODEL=$(jq -r '.models.anthropic.model // empty' "$SETTINGS_FILE" 2>/dev/null)
+                fi
+                echo -e "${BLUE}Current provider: ${GREEN}$CURRENT_PROVIDER${NC}"
+                if [ -n "$CURRENT_MODEL" ]; then
+                    echo -e "${BLUE}Current model: ${GREEN}$CURRENT_MODEL${NC}"
+                fi
+            else
+                echo -e "${RED}No settings file found${NC}"
+                exit 1
+            fi
+        else
+            # Parse optional --model flag
+            PROVIDER_ARG="$2"
+            MODEL_ARG=""
+            if [ "$3" = "--model" ] && [ -n "$4" ]; then
+                MODEL_ARG="$4"
+            fi
+
+            case "$PROVIDER_ARG" in
+                anthropic)
+                    if [ ! -f "$SETTINGS_FILE" ]; then
+                        echo -e "${RED}No settings file found. Run setup first.${NC}"
+                        exit 1
+                    fi
+
+                    # Switch to Anthropic provider
+                    tmp_file="$SETTINGS_FILE.tmp"
+                    if [ -n "$MODEL_ARG" ]; then
+                        # Set both provider and model
+                        jq ".models.provider = \"anthropic\" | .models.anthropic.model = \"$MODEL_ARG\"" "$SETTINGS_FILE" > "$tmp_file" && mv "$tmp_file" "$SETTINGS_FILE"
+                        echo -e "${GREEN}✓ Switched to Anthropic provider with model: $MODEL_ARG${NC}"
+                    else
+                        # Set provider only
+                        jq ".models.provider = \"anthropic\"" "$SETTINGS_FILE" > "$tmp_file" && mv "$tmp_file" "$SETTINGS_FILE"
+                        echo -e "${GREEN}✓ Switched to Anthropic provider${NC}"
+                        echo ""
+                        echo "Use './tinyclaw.sh model {sonnet|opus}' to set the model."
+                    fi
+                    ;;
+                openai)
+                    if [ ! -f "$SETTINGS_FILE" ]; then
+                        echo -e "${RED}No settings file found. Run setup first.${NC}"
+                        exit 1
+                    fi
+
+                    # Switch to OpenAI provider (using Codex CLI)
+                    tmp_file="$SETTINGS_FILE.tmp"
+                    if [ -n "$MODEL_ARG" ]; then
+                        # Set both provider and model (supports any model name)
+                        jq ".models.provider = \"openai\" | .models.openai.model = \"$MODEL_ARG\"" "$SETTINGS_FILE" > "$tmp_file" && mv "$tmp_file" "$SETTINGS_FILE"
+                        echo -e "${GREEN}✓ Switched to OpenAI/Codex provider with model: $MODEL_ARG${NC}"
+                        echo ""
+                        echo "Note: Make sure you have the 'codex' CLI installed and authenticated."
+                    else
+                        # Set provider only
+                        jq ".models.provider = \"openai\"" "$SETTINGS_FILE" > "$tmp_file" && mv "$tmp_file" "$SETTINGS_FILE"
+                        echo -e "${GREEN}✓ Switched to OpenAI/Codex provider${NC}"
+                        echo ""
+                        echo "Use './tinyclaw.sh model {gpt-5.3-codex|gpt-5.2}' to set the model."
+                        echo "Note: Make sure you have the 'codex' CLI installed and authenticated."
+                    fi
+                    ;;
+                *)
+                    echo "Usage: $0 provider {anthropic|openai} [--model MODEL_NAME]"
+                    echo ""
+                    echo "Examples:"
+                    echo "  $0 provider                                    # Show current provider and model"
+                    echo "  $0 provider anthropic                          # Switch to Anthropic"
+                    echo "  $0 provider openai                             # Switch to OpenAI"
+                    echo "  $0 provider anthropic --model sonnet           # Switch to Anthropic with Sonnet"
+                    echo "  $0 provider openai --model gpt-5.3-codex       # Switch to OpenAI with GPT-5.3 Codex"
+                    echo "  $0 provider openai --model gpt-4o              # Switch to OpenAI with custom model"
+                    exit 1
+                    ;;
+            esac
+        fi
+        ;;
     model)
         if [ -z "$2" ]; then
             if [ -f "$SETTINGS_FILE" ]; then
-                CURRENT_MODEL=$(grep -o '"model"[[:space:]]*:[[:space:]]*"[^"]*"' "$SETTINGS_FILE" | cut -d'"' -f4)
-                echo -e "${BLUE}Current model: ${GREEN}$CURRENT_MODEL${NC}"
+                CURRENT_PROVIDER=$(jq -r '.models.provider // "anthropic"' "$SETTINGS_FILE" 2>/dev/null)
+                if [ "$CURRENT_PROVIDER" = "openai" ]; then
+                    CURRENT_MODEL=$(jq -r '.models.openai.model // empty' "$SETTINGS_FILE" 2>/dev/null)
+                else
+                    CURRENT_MODEL=$(jq -r '.models.anthropic.model // empty' "$SETTINGS_FILE" 2>/dev/null)
+                fi
+                if [ -n "$CURRENT_MODEL" ]; then
+                    echo -e "${BLUE}Current provider: ${GREEN}$CURRENT_PROVIDER${NC}"
+                    echo -e "${BLUE}Current model: ${GREEN}$CURRENT_MODEL${NC}"
+                else
+                    echo -e "${RED}No model configured${NC}"
+                    exit 1
+                fi
             else
                 echo -e "${RED}No settings file found${NC}"
                 exit 1
@@ -540,23 +666,43 @@ case "${1:-}" in
                         exit 1
                     fi
 
-                    if [[ "$OSTYPE" == "darwin"* ]]; then
-                        sed -i '' "s/\"model\"[[:space:]]*:[[:space:]]*\"[^\"]*\"/\"model\": \"$2\"/" "$SETTINGS_FILE"
-                    else
-                        sed -i "s/\"model\"[[:space:]]*:[[:space:]]*\"[^\"]*\"/\"model\": \"$2\"/" "$SETTINGS_FILE"
+                    # Update model using jq
+                    tmp_file="$SETTINGS_FILE.tmp"
+                    jq ".models.anthropic.model = \"$2\"" "$SETTINGS_FILE" > "$tmp_file" && mv "$tmp_file" "$SETTINGS_FILE"
+
+                    echo -e "${GREEN}✓ Model switched to: $2${NC}"
+                    echo ""
+                    echo "Note: This affects the queue processor. Changes take effect on next message."
+                    ;;
+                gpt-5.2|gpt-5.3-codex)
+                    if [ ! -f "$SETTINGS_FILE" ]; then
+                        echo -e "${RED}No settings file found. Run setup first.${NC}"
+                        exit 1
                     fi
+
+                    # Update model using jq
+                    tmp_file="$SETTINGS_FILE.tmp"
+                    jq ".models.openai.model = \"$2\"" "$SETTINGS_FILE" > "$tmp_file" && mv "$tmp_file" "$SETTINGS_FILE"
 
                     echo -e "${GREEN}✓ Model switched to: $2${NC}"
                     echo ""
                     echo "Note: This affects the queue processor. Changes take effect on next message."
                     ;;
                 *)
-                    echo "Usage: $0 model {sonnet|opus}"
+                    echo "Usage: $0 model {sonnet|opus|gpt-5.2|gpt-5.3-codex}"
+                    echo ""
+                    echo "Anthropic models:"
+                    echo "  sonnet            # Claude Sonnet (fast)"
+                    echo "  opus              # Claude Opus (smartest)"
+                    echo ""
+                    echo "OpenAI models:"
+                    echo "  gpt-5.3-codex     # GPT-5.3 Codex"
+                    echo "  gpt-5.2           # GPT-5.2"
                     echo ""
                     echo "Examples:"
-                    echo "  $0 model          # Show current model"
-                    echo "  $0 model sonnet   # Switch to Sonnet"
-                    echo "  $0 model opus     # Switch to Opus"
+                    echo "  $0 model                # Show current model"
+                    echo "  $0 model sonnet         # Switch to Claude Sonnet"
+                    echo "  $0 model gpt-5.3-codex  # Switch to GPT-5.3 Codex"
                     exit 1
                     ;;
             esac
@@ -572,24 +718,26 @@ case "${1:-}" in
         local_names=$(IFS='|'; echo "${ALL_CHANNELS[*]}")
         echo -e "${BLUE}TinyClaw - Claude Code + Messaging Channels${NC}"
         echo ""
-        echo "Usage: $0 {start|stop|restart|status|setup|send|logs|reset|channels|model|attach}"
+        echo "Usage: $0 {start|stop|restart|status|setup|send|logs|reset|channels|provider|model|attach}"
         echo ""
         echo "Commands:"
         echo "  start                    Start TinyClaw"
         echo "  stop                     Stop all processes"
         echo "  restart                  Restart TinyClaw"
         echo "  status                   Show current status"
-        echo "  setup                    Run setup wizard (change channels/model/heartbeat)"
-        echo "  send <msg>               Send message to Claude manually"
+        echo "  setup                    Run setup wizard (change channels/provider/model/heartbeat)"
+        echo "  send <msg>               Send message to AI manually"
         echo "  logs [type]              View logs ($local_names|heartbeat|daemon|queue|all)"
         echo "  reset                    Reset conversation (next message starts fresh)"
         echo "  channels reset <channel> Reset channel auth ($local_names)"
-        echo "  model [sonnet|opus]      Show or switch Claude model"
+        echo "  provider [name] [--model model]  Show or switch AI provider"
+        echo "  model [name]             Show or switch AI model"
         echo "  attach                   Attach to tmux session"
         echo ""
         echo "Examples:"
         echo "  $0 start"
         echo "  $0 status"
+        echo "  $0 provider openai --model gpt-5.3-codex"
         echo "  $0 model opus"
         echo "  $0 send 'What time is it?'"
         echo "  $0 channels reset whatsapp"
