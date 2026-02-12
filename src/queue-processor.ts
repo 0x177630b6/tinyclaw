@@ -378,6 +378,15 @@ async function processMessage(messageFile: string): Promise<void> {
             message = routing.message;
         }
 
+        // If no explicit @team prefix, check channel default_team
+        if (agentId === 'default') {
+            const channelDefaultTeam = settings?.channels?.[channel as keyof typeof settings.channels];
+            const defaultTeamId = (channelDefaultTeam as any)?.default_team;
+            if (defaultTeamId && agents[defaultTeamId]) {
+                agentId = defaultTeamId;
+            }
+        }
+
         // Easter egg: Handle multiple team mentions
         if (agentId === 'error') {
             log('INFO', `Multiple teams detected, sending easter egg message`);

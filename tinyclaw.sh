@@ -319,11 +319,37 @@ case "${1:-}" in
     allowed)
         access_list
         ;;
+    default-team)
+        if [ -z "$2" ]; then
+            # Show current default team bindings
+            _ensure_settings
+            echo -e "${BLUE}Default Team Bindings${NC}"
+            echo ""
+            for ch in "${VALID_CHANNELS[@]}"; do
+                dt=$(jq -r ".channels.$ch.default_team // empty" "$SETTINGS_FILE" 2>/dev/null)
+                if [ -n "$dt" ]; then
+                    echo -e "  ${YELLOW}$ch${NC} → $dt"
+                fi
+            done
+            if ! jq -e '.channels | to_entries[] | select(.value.default_team) | .key' "$SETTINGS_FILE" &>/dev/null; then
+                echo "  (no default teams configured)"
+            fi
+        elif [ -z "$3" ]; then
+            echo "Usage: $0 default-team <channel> <team_id>"
+            echo "       $0 default-team <channel> --clear"
+            echo "       $0 default-team"
+            exit 1
+        elif [ "$3" = "--clear" ]; then
+            access_clear_default_team "$2"
+        else
+            access_set_default_team "$2" "$3"
+        fi
+        ;;
     *)
         local_names=$(IFS='|'; echo "${ALL_CHANNELS[*]}")
         echo -e "${BLUE}TinyClaw - Claude Code + Messaging Channels${NC}"
         echo ""
-        echo "Usage: $0 {start|stop|restart|status|setup|send|logs|reset|channels|provider|model|team|allow|deny|allow-group|deny-group|allowed|update|attach}"
+        echo "Usage: $0 {start|stop|restart|status|setup|send|logs|reset|channels|provider|model|team|allow|deny|allow-group|deny-group|allowed|default-team|update|attach}"
         echo ""
         echo "Commands:"
         echo "  start                    Start TinyClaw"
@@ -343,6 +369,7 @@ case "${1:-}" in
         echo "  allow-group <channel> <id>  Allow a group/guild on a channel"
         echo "  deny-group <channel> <id>   Remove a group from allowlist"
         echo "  allowed                  List all access control settings"
+        echo "  default-team [ch] [team] Set/show/clear default team per channel"
         echo "  update                   Update TinyClaw to latest version"
         echo "  attach                   Attach to tmux session"
         echo ""

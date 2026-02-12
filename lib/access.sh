@@ -79,6 +79,33 @@ access_deny_group() {
     echo -e "${GREEN}Denied group $group_id on $channel${NC}"
 }
 
+access_set_default_team() {
+    local channel="$1"
+    local team_id="$2"
+    _validate_channel "$channel" || exit 1
+    _ensure_settings
+
+    local tmp_file="$SETTINGS_FILE.tmp"
+    jq --arg ch "$channel" --arg tid "$team_id" '
+        .channels[$ch].default_team = $tid
+    ' "$SETTINGS_FILE" > "$tmp_file" && mv "$tmp_file" "$SETTINGS_FILE"
+
+    echo -e "${GREEN}Default team for $channel set to: $team_id${NC}"
+}
+
+access_clear_default_team() {
+    local channel="$1"
+    _validate_channel "$channel" || exit 1
+    _ensure_settings
+
+    local tmp_file="$SETTINGS_FILE.tmp"
+    jq --arg ch "$channel" '
+        .channels[$ch] |= del(.default_team)
+    ' "$SETTINGS_FILE" > "$tmp_file" && mv "$tmp_file" "$SETTINGS_FILE"
+
+    echo -e "${GREEN}Default team for $channel cleared${NC}"
+}
+
 access_list() {
     _ensure_settings
 
@@ -86,9 +113,13 @@ access_list() {
     echo ""
     for channel in "${VALID_CHANNELS[@]}"; do
         echo -e "${YELLOW}$channel:${NC}"
-        local users groups
+        local users groups default_team
         users=$(jq -r ".channels.$channel.allowed_users // [] | .[]" "$SETTINGS_FILE" 2>/dev/null)
         groups=$(jq -r ".channels.$channel.allowed_groups // [] | .[]" "$SETTINGS_FILE" 2>/dev/null)
+        default_team=$(jq -r ".channels.$channel.default_team // empty" "$SETTINGS_FILE" 2>/dev/null)
+        if [ -n "$default_team" ]; then
+            echo "  Default team: $default_team"
+        fi
         if [ -z "$users" ] && [ -z "$groups" ]; then
             echo "  (no restrictions - all users allowed)"
         else
