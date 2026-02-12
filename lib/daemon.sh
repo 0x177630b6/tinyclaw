@@ -96,8 +96,8 @@ start_daemon() {
     done
 
     # --- Build tmux session dynamically ---
-    # Total panes = N channels + 3 (queue, heartbeat, logs)
-    local total_panes=$(( ${#ACTIVE_CHANNELS[@]} + 3 ))
+    # Total panes = N channels + 4 (queue, heartbeat, logs, shell)
+    local total_panes=$(( ${#ACTIVE_CHANNELS[@]} + 4 ))
 
     tmux new-session -d -s "$TMUX_SESSION" -n "tinyclaw" -c "$SCRIPT_DIR"
 
@@ -130,6 +130,11 @@ start_daemon() {
     # Logs pane
     tmux send-keys -t "$TMUX_SESSION:0.$pane_idx" "cd '$SCRIPT_DIR' && $log_tail_cmd" C-m
     tmux select-pane -t "$TMUX_SESSION:0.$pane_idx" -T "Logs"
+    pane_idx=$((pane_idx + 1))
+
+    # Shell pane (interactive terminal)
+    tmux send-keys -t "$TMUX_SESSION:0.$pane_idx" "cd '$SCRIPT_DIR'" C-m
+    tmux select-pane -t "$TMUX_SESSION:0.$pane_idx" -T "Shell"
 
     echo ""
     echo -e "${GREEN}✓ TinyClaw started${NC}"

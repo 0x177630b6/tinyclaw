@@ -26,6 +26,7 @@ source "$SCRIPT_DIR/lib/daemon.sh"
 source "$SCRIPT_DIR/lib/messaging.sh"
 source "$SCRIPT_DIR/lib/teams.sh"
 source "$SCRIPT_DIR/lib/update.sh"
+source "$SCRIPT_DIR/lib/access.sh"
 
 # --- Main command dispatch ---
 
@@ -287,11 +288,42 @@ case "${1:-}" in
     update)
         do_update
         ;;
+    allow)
+        if [ -z "$2" ] || [ -z "$3" ]; then
+            echo "Usage: $0 allow <channel> <user_id>"
+            exit 1
+        fi
+        access_allow_user "$2" "$3"
+        ;;
+    deny)
+        if [ -z "$2" ] || [ -z "$3" ]; then
+            echo "Usage: $0 deny <channel> <user_id>"
+            exit 1
+        fi
+        access_deny_user "$2" "$3"
+        ;;
+    allow-group)
+        if [ -z "$2" ] || [ -z "$3" ]; then
+            echo "Usage: $0 allow-group <channel> <group_id>"
+            exit 1
+        fi
+        access_allow_group "$2" "$3"
+        ;;
+    deny-group)
+        if [ -z "$2" ] || [ -z "$3" ]; then
+            echo "Usage: $0 deny-group <channel> <group_id>"
+            exit 1
+        fi
+        access_deny_group "$2" "$3"
+        ;;
+    allowed)
+        access_list
+        ;;
     *)
         local_names=$(IFS='|'; echo "${ALL_CHANNELS[*]}")
         echo -e "${BLUE}TinyClaw - Claude Code + Messaging Channels${NC}"
         echo ""
-        echo "Usage: $0 {start|stop|restart|status|setup|send|logs|reset|channels|provider|model|team|update|attach}"
+        echo "Usage: $0 {start|stop|restart|status|setup|send|logs|reset|channels|provider|model|team|allow|deny|allow-group|deny-group|allowed|update|attach}"
         echo ""
         echo "Commands:"
         echo "  start                    Start TinyClaw"
@@ -306,6 +338,11 @@ case "${1:-}" in
         echo "  provider [name] [--model model]  Show or switch AI provider"
         echo "  model [name]             Show or switch AI model"
         echo "  team {list|add|remove|show|reset}  Manage teams"
+        echo "  allow <channel> <id>     Allow a user on a channel"
+        echo "  deny <channel> <id>      Remove a user from allowlist"
+        echo "  allow-group <channel> <id>  Allow a group/guild on a channel"
+        echo "  deny-group <channel> <id>   Remove a group from allowlist"
+        echo "  allowed                  List all access control settings"
         echo "  update                   Update TinyClaw to latest version"
         echo "  attach                   Attach to tmux session"
         echo ""
