@@ -117,8 +117,8 @@ start_daemon() {
         pane_idx=$((pane_idx + 1))
     done
 
-    # Queue pane
-    tmux send-keys -t "$TMUX_SESSION:0.$pane_idx" "cd '$SCRIPT_DIR' && node dist/queue-processor.js" C-m
+    # Queue pane (unset Claude Code env vars so nested claude invocations work)
+    tmux send-keys -t "$TMUX_SESSION:0.$pane_idx" "cd '$SCRIPT_DIR' && unset CLAUDECODE CLAUDE_CODE_ENTRYPOINT && node dist/queue-processor.js" C-m
     tmux select-pane -t "$TMUX_SESSION:0.$pane_idx" -T "Queue"
     pane_idx=$((pane_idx + 1))
 

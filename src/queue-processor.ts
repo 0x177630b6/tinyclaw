@@ -34,7 +34,10 @@ async function processMessage(messageFile: string): Promise<void> {
     const processingFile = path.join(QUEUE_PROCESSING, path.basename(messageFile));
 
     try {
-        // Move to processing to mark as in-progress
+        // Move to processing to mark as in-progress (skip if already moved by another poll cycle)
+        if (!fs.existsSync(messageFile)) {
+            return;
+        }
         fs.renameSync(messageFile, processingFile);
 
         // Read message
@@ -67,6 +70,15 @@ async function processMessage(messageFile: string): Promise<void> {
             agentId = routing.agentId;
             message = routing.message;
             isTeamRouted = !!routing.isTeam;
+        }
+
+        // If no explicit @team prefix, check channel default_team
+        if (agentId === 'default') {
+            const channelDefaultTeam = settings?.channels?.[channel as keyof typeof settings.channels];
+            const defaultTeamId = (channelDefaultTeam as any)?.default_team;
+            if (defaultTeamId && agents[defaultTeamId]) {
+                agentId = defaultTeamId;
+            }
         }
 
         // Easter egg: Handle multiple agent mentions
@@ -493,4 +505,12 @@ process.on('SIGINT', () => {
 process.on('SIGTERM', () => {
     log('INFO', 'Shutting down queue processor...');
     process.exit(0);
+});
+
+process.on('uncaughtException', (err) => {
+    log('ERROR', `Uncaught exception: ${err.message}\n${err.stack}`);
+});
+
+process.on('unhandledRejection', (reason) => {
+    log('ERROR', `Unhandled rejection: ${reason}`);
 });

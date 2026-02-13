@@ -329,3 +329,31 @@ update_agent_team_info() {
     # Append team block to AGENTS.md
     echo -e "$team_block" >> "$agents_md"
 }
+
+team_reset() {
+    local team_id="$1"
+
+    if [ ! -f "$SETTINGS_FILE" ]; then
+        echo -e "${RED}No settings file found.${NC}"
+        exit 1
+    fi
+
+    local agent_json
+    agent_json=$(jq -r ".teams.\"${team_id}\" // empty" "$SETTINGS_FILE" 2>/dev/null)
+
+    if [ -z "$agent_json" ]; then
+        echo -e "${RED}Team '${team_id}' not found.${NC}"
+        exit 1
+    fi
+
+    local teams_dir="$HOME/.tinyclaw/teams"
+    mkdir -p "$teams_dir/$team_id"
+    touch "$teams_dir/$team_id/reset_flag"
+
+    local agent_name
+    agent_name=$(jq -r ".teams.\"${team_id}\".name" "$SETTINGS_FILE" 2>/dev/null)
+
+    echo -e "${GREEN}Reset flag set for team '${team_id}' (${agent_name})${NC}"
+    echo ""
+    echo "The next message to @${team_id} will start a fresh conversation."
+}

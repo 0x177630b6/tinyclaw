@@ -22,6 +22,29 @@ const SESSION_DIR = path.join(SCRIPT_DIR, '.tinyclaw/whatsapp-session');
 const SETTINGS_FILE = path.join(TINYCLAW_HOME, 'settings.json');
 const FILES_DIR = path.join(TINYCLAW_HOME, 'files');
 
+// Access control: load allowed users/groups from settings
+function loadAccessControl(): { allowed_users: string[]; allowed_groups: string[] } {
+    try {
+        const data = fs.readFileSync(SETTINGS_FILE, 'utf8');
+        const settings = JSON.parse(data);
+        const ch = settings.channels?.whatsapp || {};
+        return {
+            allowed_users: Array.isArray(ch.allowed_users) ? ch.allowed_users.map(String) : [],
+            allowed_groups: Array.isArray(ch.allowed_groups) ? ch.allowed_groups.map(String) : [],
+        };
+    } catch {
+        return { allowed_users: [], allowed_groups: [] };
+    }
+}
+
+function isAllowed(userId: string, groupId?: string): boolean {
+    const { allowed_users, allowed_groups } = loadAccessControl();
+    if (allowed_users.length === 0 && allowed_groups.length === 0) return true;
+    if (userId && allowed_users.includes(userId)) return true;
+    if (groupId && allowed_groups.includes(groupId)) return true;
+    return false;
+}
+
 // Ensure directories exist
 [QUEUE_INCOMING, QUEUE_OUTGOING, path.dirname(LOG_FILE), SESSION_DIR, FILES_DIR].forEach(dir => {
     if (!fs.existsSync(dir)) {
@@ -241,9 +264,19 @@ client.on('message_create', async (message: Message) => {
         const contact = await message.getContact();
         const sender = contact.pushname || contact.name || message.from;
 
-        // Skip group messages
+        // Access control: check if user/group is allowed
         if (chat.isGroup) {
-            return;
+            const groupId = chat.id._serialized;
+            const authorId = message.author;
+            if (!isAllowed(authorId || '', groupId)) {
+                log('INFO', `Blocked message from unauthorized user/group: ${authorId} / ${groupId}`);
+                return;
+            }
+        } else {
+            if (!isAllowed(message.from)) {
+                log('INFO', `Blocked message from unauthorized user: ${message.from}`);
+                return;
+            }
         }
 
         // Generate unique message ID

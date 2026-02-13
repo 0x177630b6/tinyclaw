@@ -8,9 +8,15 @@ import { ensureAgentDirectory, updateAgentTeammates } from './agent-setup';
 
 export async function runCommand(command: string, args: string[], cwd?: string): Promise<string> {
     return new Promise((resolve, reject) => {
+        // Remove Claude Code env vars to allow nested Claude Code invocations
+        const env = { ...process.env };
+        delete env.CLAUDECODE;
+        delete env.CLAUDE_CODE_ENTRYPOINT;
         const child = spawn(command, args, {
             cwd: cwd || SCRIPT_DIR,
             stdio: ['ignore', 'pipe', 'pipe'],
+            env,
+            detached: true,
         });
 
         let stdout = '';
@@ -31,14 +37,20 @@ export async function runCommand(command: string, args: string[], cwd?: string):
             reject(error);
         });
 
-        child.on('close', (code) => {
+        child.on('close', (code, signal) => {
             if (code === 0) {
                 resolve(stdout);
                 return;
             }
 
-            const errorMessage = stderr.trim() || `Command exited with code ${code}`;
+            const errorMessage = stderr.trim() || `Command exited with code ${code}, signal ${signal}`;
             reject(new Error(errorMessage));
+        });
+
+        child.on('exit', (code, signal) => {
+            if (signal) {
+                log('ERROR', `Child process killed by signal: ${signal}`);
+            }
         });
     });
 }

@@ -31,6 +31,7 @@ source "$SCRIPT_DIR/lib/messaging.sh"
 source "$SCRIPT_DIR/lib/agents.sh"
 source "$SCRIPT_DIR/lib/teams.sh"
 source "$SCRIPT_DIR/lib/update.sh"
+source "$SCRIPT_DIR/lib/access.sh"
 
 # --- Main command dispatch ---
 
@@ -355,11 +356,68 @@ case "${1:-}" in
     update)
         do_update
         ;;
+    allow)
+        if [ -z "$2" ] || [ -z "$3" ]; then
+            echo "Usage: $0 allow <channel> <user_id>"
+            exit 1
+        fi
+        access_allow_user "$2" "$3"
+        ;;
+    deny)
+        if [ -z "$2" ] || [ -z "$3" ]; then
+            echo "Usage: $0 deny <channel> <user_id>"
+            exit 1
+        fi
+        access_deny_user "$2" "$3"
+        ;;
+    allow-group)
+        if [ -z "$2" ] || [ -z "$3" ]; then
+            echo "Usage: $0 allow-group <channel> <group_id>"
+            exit 1
+        fi
+        access_allow_group "$2" "$3"
+        ;;
+    deny-group)
+        if [ -z "$2" ] || [ -z "$3" ]; then
+            echo "Usage: $0 deny-group <channel> <group_id>"
+            exit 1
+        fi
+        access_deny_group "$2" "$3"
+        ;;
+    allowed)
+        access_list
+        ;;
+    default-team)
+        if [ -z "$2" ]; then
+            # Show current default team bindings
+            _ensure_settings
+            echo -e "${BLUE}Default Team Bindings${NC}"
+            echo ""
+            for ch in "${VALID_CHANNELS[@]}"; do
+                dt=$(jq -r ".channels.$ch.default_team // empty" "$SETTINGS_FILE" 2>/dev/null)
+                if [ -n "$dt" ]; then
+                    echo -e "  ${YELLOW}$ch${NC} → $dt"
+                fi
+            done
+            if ! jq -e '.channels | to_entries[] | select(.value.default_team) | .key' "$SETTINGS_FILE" &>/dev/null; then
+                echo "  (no default teams configured)"
+            fi
+        elif [ -z "$3" ]; then
+            echo "Usage: $0 default-team <channel> <team_id>"
+            echo "       $0 default-team <channel> --clear"
+            echo "       $0 default-team"
+            exit 1
+        elif [ "$3" = "--clear" ]; then
+            access_clear_default_team "$2"
+        else
+            access_set_default_team "$2" "$3"
+        fi
+        ;;
     *)
         local_names=$(IFS='|'; echo "${ALL_CHANNELS[*]}")
         echo -e "${BLUE}TinyClaw - Claude Code + Messaging Channels${NC}"
         echo ""
-        echo "Usage: $0 {start|stop|restart|status|setup|send|logs|reset|channels|provider|model|agent|team|update|attach}"
+        echo "Usage: $0 {start|stop|restart|status|setup|send|logs|reset|channels|provider|model|agent|team|allow|deny|allow-group|deny-group|allowed|default-team|update|attach}"
         echo ""
         echo "Commands:"
         echo "  start                    Start TinyClaw"
@@ -375,6 +433,12 @@ case "${1:-}" in
         echo "  model [name]             Show or switch AI model"
         echo "  agent {list|add|remove|show|reset}  Manage agents"
         echo "  team {list|add|remove|show|visualize}  Manage teams"
+        echo "  allow <channel> <id>     Allow a user on a channel"
+        echo "  deny <channel> <id>      Remove a user from allowlist"
+        echo "  allow-group <channel> <id>  Allow a group/guild on a channel"
+        echo "  deny-group <channel> <id>   Remove a group from allowlist"
+        echo "  allowed                  List all access control settings"
+        echo "  default-team [ch] [team] Set/show/clear default team per channel"
         echo "  update                   Update TinyClaw to latest version"
         echo "  attach                   Attach to tmux session"
         echo ""

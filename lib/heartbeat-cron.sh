@@ -11,12 +11,16 @@ fi
 LOG_FILE="$TINYCLAW_HOME/logs/heartbeat.log"
 QUEUE_INCOMING="$TINYCLAW_HOME/queue/incoming"
 QUEUE_OUTGOING="$TINYCLAW_HOME/queue/outgoing"
-SETTINGS_FILE="$PROJECT_ROOT/.tinyclaw/settings.json"
+if [ -f "$PROJECT_ROOT/.tinyclaw/settings.json" ]; then
+    SETTINGS_FILE="$PROJECT_ROOT/.tinyclaw/settings.json"
+else
+    SETTINGS_FILE="$HOME/.tinyclaw/settings.json"
+fi
 
 # Read interval from settings.json, default to 3600
 if [ -f "$SETTINGS_FILE" ]; then
     if command -v jq &> /dev/null; then
-        INTERVAL=$(jq -r '.monitoring.heartbeat_interval // empty' "$SETTINGS_FILE" 2>/dev/null)
+        INTERVAL=$(jq -r '.heartbeat_interval // .monitoring.heartbeat_interval // empty' "$SETTINGS_FILE" 2>/dev/null)
     fi
 fi
 INTERVAL=${INTERVAL:-3600}
@@ -46,8 +50,8 @@ while true; do
         WORKSPACE_PATH="$HOME/tinyclaw-workspace"
     fi
 
-    # Get all agent IDs
-    AGENT_IDS=$(jq -r '(.agents // {}) | keys[]' "$SETTINGS_FILE" 2>/dev/null)
+    # Get all agent IDs (check both .agents and .teams)
+    AGENT_IDS=$(jq -r '((.agents // {}) + (.teams // {})) | keys[]' "$SETTINGS_FILE" 2>/dev/null)
 
     if [ -z "$AGENT_IDS" ]; then
         log "No agents configured - using default agent"
@@ -60,8 +64,8 @@ while true; do
     for AGENT_ID in $AGENT_IDS; do
         AGENT_COUNT=$((AGENT_COUNT + 1))
 
-        # Get agent's working directory
-        AGENT_DIR=$(jq -r "(.agents // {}).\"${AGENT_ID}\".working_directory // empty" "$SETTINGS_FILE" 2>/dev/null)
+        # Get agent's working directory (check .agents first, then .teams)
+        AGENT_DIR=$(jq -r "((.agents // {}).\"${AGENT_ID}\" // (.teams // {}).\"${AGENT_ID}\").working_directory // empty" "$SETTINGS_FILE" 2>/dev/null)
         if [ -z "$AGENT_DIR" ]; then
             AGENT_DIR="$WORKSPACE_PATH/$AGENT_ID"
         fi
@@ -70,26 +74,25 @@ while true; do
         HEARTBEAT_FILE="$AGENT_DIR/heartbeat.md"
         if [ -f "$HEARTBEAT_FILE" ]; then
             PROMPT=$(cat "$HEARTBEAT_FILE")
-            log "  → Agent @$AGENT_ID: using custom heartbeat.md"
+            log "  → Team @$AGENT_ID: using custom heartbeat.md"
         else
             PROMPT="Quick status check: Any pending tasks? Keep response brief."
-            log "  → Agent @$AGENT_ID: using default prompt"
+            log "  → Team @$AGENT_ID: using default prompt"
         fi
 
         # Generate unique message ID
         MESSAGE_ID="heartbeat_${AGENT_ID}_$(date +%s)_$$"
 
-        # Write to queue with @agent_id routing prefix
-        cat > "$QUEUE_INCOMING/${MESSAGE_ID}.json" << EOF
-{
-  "channel": "heartbeat",
-  "sender": "System",
-  "senderId": "heartbeat_${AGENT_ID}",
-  "message": "@${AGENT_ID} ${PROMPT}",
-  "timestamp": $(date +%s)000,
-  "messageId": "$MESSAGE_ID"
-}
-EOF
+        # Write to queue with @agent_id routing prefix (use jq for proper JSON escaping)
+        jq -n \
+            --arg channel "heartbeat" \
+            --arg sender "System" \
+            --arg senderId "heartbeat_${AGENT_ID}" \
+            --arg message "@${AGENT_ID} ${PROMPT}" \
+            --argjson timestamp "$(date +%s)000" \
+            --arg messageId "$MESSAGE_ID" \
+            '{channel: $channel, sender: $sender, senderId: $senderId, message: $message, timestamp: $timestamp, messageId: $messageId}' \
+            > "$QUEUE_INCOMING/${MESSAGE_ID}.json"
 
         log "  ✓ Queued for @$AGENT_ID: $MESSAGE_ID"
     done

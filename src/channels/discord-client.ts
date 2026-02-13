@@ -23,6 +23,29 @@ const LOG_FILE = path.join(TINYCLAW_HOME, 'logs/discord.log');
 const SETTINGS_FILE = path.join(TINYCLAW_HOME, 'settings.json');
 const FILES_DIR = path.join(TINYCLAW_HOME, 'files');
 
+// Access control: load allowed users/groups from settings
+function loadAccessControl(): { allowed_users: string[]; allowed_groups: string[] } {
+    try {
+        const data = fs.readFileSync(SETTINGS_FILE, 'utf8');
+        const settings = JSON.parse(data);
+        const ch = settings.channels?.discord || {};
+        return {
+            allowed_users: Array.isArray(ch.allowed_users) ? ch.allowed_users.map(String) : [],
+            allowed_groups: Array.isArray(ch.allowed_groups) ? ch.allowed_groups.map(String) : [],
+        };
+    } catch {
+        return { allowed_users: [], allowed_groups: [] };
+    }
+}
+
+function isAllowed(userId: string, guildId?: string): boolean {
+    const { allowed_users, allowed_groups } = loadAccessControl();
+    if (allowed_users.length === 0 && allowed_groups.length === 0) return true;
+    if (userId && allowed_users.includes(userId)) return true;
+    if (guildId && allowed_groups.includes(guildId)) return true;
+    return false;
+}
+
 // Ensure directories exist
 [QUEUE_INCOMING, QUEUE_OUTGOING, path.dirname(LOG_FILE), FILES_DIR].forEach(dir => {
     if (!fs.existsSync(dir)) {
@@ -228,8 +251,12 @@ client.on(Events.MessageCreate, async (message: Message) => {
             return;
         }
 
-        // Skip non-DM messages (guild = server channel)
-        if (message.guild) {
+        // Access control: check if user/guild is allowed
+        const discordUserId = message.author.id;
+        const discordGuildId = message.guild ? message.guild.id : undefined;
+
+        if (!isAllowed(discordUserId, discordGuildId)) {
+            log('INFO', `Blocked message from unauthorized user/guild: ${discordUserId} / ${discordGuildId}`);
             return;
         }
 
