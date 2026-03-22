@@ -115,8 +115,8 @@ export function ensureAgentDirectory(agentDir: string): void {
     // Create memory directory for hierarchical memory system
     fs.mkdirSync(path.join(agentDir, 'memory'), { recursive: true });
 
-    // Always sync skills (keeps them up to date for both new and existing dirs)
-    syncAgentSkills(agentDir);
+    // Skill sync disabled — agents manage their own .claude/skills/ in workspace
+    // syncAgentSkills(agentDir);
 }
 
 /**

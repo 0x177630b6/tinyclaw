@@ -1,5 +1,6 @@
 export { AgentChatView } from "./chat-view";
 export { HeartbeatTab } from "./heartbeat-tab";
+export { LogFeedTab } from "./log-feed";
 export { MemoryTab } from "./memory-tab";
 export { ScheduleTab } from "./schedule-tab";
 export { SkillsTab } from "./skills-tab";

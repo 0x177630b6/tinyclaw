@@ -176,6 +176,10 @@ export async function getLogs(limit = 100): Promise<{ lines: string[] }> {
   return apiFetch(`/api/logs?limit=${limit}`);
 }
 
+export async function getAgentLogs(agentId: string, limit = 200): Promise<{ entries: any[]; total: number }> {
+  return apiFetch(`/api/agents/${encodeURIComponent(agentId)}/logs?limit=${limit}`);
+}
+
 export async function saveAgent(
   id: string,
   agent: Partial<AgentConfig> & Pick<AgentConfig, "name" | "provider" | "model">

@@ -25,6 +25,7 @@ import {
   SystemPromptTab,
   MemoryTab,
   HeartbeatTab,
+  LogFeedTab,
 } from "@/components/agent";
 import {
   Bot,
@@ -33,6 +34,7 @@ import {
   Brain,
   HeartPulse,
   CalendarDays,
+  Activity,
   ArrowLeft,
 } from "lucide-react";
 
@@ -50,10 +52,11 @@ function agentColor(id: string): string {
 }
 import Link from "next/link";
 
-type TabId = "chat" | "skills" | "schedule" | "system-prompt" | "memory" | "heartbeat";
+type TabId = "chat" | "activity" | "skills" | "schedule" | "system-prompt" | "memory" | "heartbeat";
 
 const TABS: { id: TabId; label: string; icon: typeof Swords }[] = [
   { id: "chat", label: "Chat", icon: Bot },
+  { id: "activity", label: "Activity", icon: Activity },
   { id: "skills", label: "Skills", icon: Swords },
   { id: "schedule", label: "Schedule", icon: CalendarDays },
   { id: "system-prompt", label: "System Prompt", icon: FileText },
@@ -289,6 +292,9 @@ export default function AgentConfigPage({
           <div className="h-full min-h-0">
             <AgentChatView agentId={agentId} agentName={agent.name} />
           </div>
+        )}
+        {activeTab === "activity" && (
+          <LogFeedTab agentId={agentId} />
         )}
         {activeTab === "skills" && (
           <SkillsTab

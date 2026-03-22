@@ -1,6 +1,9 @@
+import fs from 'fs';
+import path from 'path';
 import { AgentAdapter, InvokeOptions } from './types';
 import { runCommand, runCommandStreaming } from '../invoke';
-import { log } from '../logging';
+import { log, emitEvent } from '../logging';
+import { TINYAGI_HOME } from '../config';
 
 /**
  * Extract displayable text from a Claude stream-json event.
@@ -35,20 +38,33 @@ export const claudeAdapter: AgentAdapter = {
 
         const args = ['--dangerously-skip-permissions'];
         if (model) args.push('--model', model);
-        if (systemPrompt) args.push('--system-prompt', systemPrompt);
+        // System prompt disabled — agents use CLAUDE.md in their workspace instead
+        // if (systemPrompt) args.push('--system-prompt', systemPrompt);
         if (continueConversation) args.push('-c');
 
         if (onEvent) {
             args.push('--output-format', 'stream-json', '--verbose', '-p', message);
 
             let response = '';
+            const logDir = path.join(TINYAGI_HOME, 'logs');
+            fs.mkdirSync(logDir, { recursive: true });
+            const logPath = path.join(logDir, `agent-${agentId}.jsonl`);
+
             await runCommandStreaming('claude', args, (line) => {
+                // Tee to per-agent JSONL log
+                try { fs.appendFileSync(logPath, line + '\n'); } catch { /* ignore write errors */ }
+
                 try {
                     const json = JSON.parse(line);
                     if (json.type === 'result') {
                         if (json.result) response = json.result;
-                        if (json.usage) log('INFO', `Claude usage (${agentId}): ${JSON.stringify(json.usage)}`);
-                        if (json.modelUsage) log('INFO', `Claude model usage (${agentId}): ${JSON.stringify(json.modelUsage)}`);
+                        if (json.usage) {
+                            log('INFO', `Claude usage (${agentId}): ${JSON.stringify(json.usage)}`);
+                        }
+                        if (json.modelUsage) {
+                            log('INFO', `Claude model usage (${agentId}): ${JSON.stringify(json.modelUsage)}`);
+                            emitEvent('usage_stats', { agentId, modelUsage: json.modelUsage });
+                        }
                         return;
                     }
                     const text = extractEventText(json);
