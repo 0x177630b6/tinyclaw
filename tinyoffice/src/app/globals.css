@@ -137,3 +137,13 @@ body {
   animation: float-skill 5s ease-in-out infinite;
   will-change: transform;
 }
+
+@keyframes bounce-subtle {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-3px); }
+}
+
+.animate-bounce-subtle {
+  animation: bounce-subtle 0.8s ease-in-out infinite;
+  will-change: transform;
+}

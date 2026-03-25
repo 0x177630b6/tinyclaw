@@ -112,6 +112,7 @@ export default function OfficePage() {
   const [bubbles, setBubbles] = useState<SpeechBubble[]>([]);
   const [chatInput, setChatInput] = useState("");
   const [sending, setSending] = useState(false);
+  const [activeAgents, setActiveAgents] = useState<Set<string>>(new Set());
 
   const [connected, setConnected] = useState(false);
   const seenRef = useRef(new Set<string>());
@@ -138,13 +139,16 @@ export default function OfficePage() {
     [agentPositions]
   );
 
-  // Compute where each agent currently is: at desk or walking to meet someone
+  // Compute where each agent currently is: at desk, wandering, or walking to meet someone
   const agentRenderPositions = useMemo(() => {
     const positions = new Map<string, { x: number; y: number }>();
 
-    // Start everyone at their desk
+    // Start everyone at their desk — active agents get a small wander offset
     for (const ap of agentPositions) {
-      positions.set(ap.id, { x: ap.deskPos.x, y: ap.deskPos.y + 0.06 });
+      const isActive = activeAgents.has(ap.id);
+      const wanderX = isActive ? (Math.sin(Date.now() / 2000 + ap.id.length) * 0.015) : 0;
+      const wanderY = isActive ? (Math.cos(Date.now() / 3000 + ap.id.length) * 0.01) : 0;
+      positions.set(ap.id, { x: ap.deskPos.x + wanderX, y: ap.deskPos.y + 0.06 + wanderY });
     }
 
     // For each active bubble with targets, move agents toward each other
@@ -196,7 +200,15 @@ export default function OfficePage() {
     }
 
     return positions;
-  }, [agentPositions, bubbles, deskPosMap]);
+  }, [agentPositions, bubbles, deskPosMap, activeAgents]);
+
+  // Animate wander positions for active agents
+  const [, setWanderTick] = useState(0);
+  useEffect(() => {
+    if (activeAgents.size === 0) return;
+    const interval = setInterval(() => setWanderTick((t) => t + 1), 2000);
+    return () => clearInterval(interval);
+  }, [activeAgents.size]);
 
   // Subscribe to SSE events
   useEffect(() => {
@@ -231,10 +243,35 @@ export default function OfficePage() {
           }
         }
 
-        // Agent/team final response
-        if (event.type === "response_ready") {
+        // Agent started working
+        if (event.type === "chain_step_start" && agentId) {
+          setActiveAgents((prev) => new Set([...prev, agentId]));
+        }
+
+        // Agent progress — intermediate reasoning
+        if (event.type === "agent_progress" && agentId) {
+          const msg = (e.text as string) || "";
+          if (msg) {
+            const bubble: SpeechBubble = {
+              id: `${event.timestamp}-${Math.random().toString(36).slice(2, 6)}`,
+              agentId,
+              message: `⏳ ${msg}`,
+              timestamp: event.timestamp,
+              targetAgents: [],
+            };
+            setBubbles((prev) => [...prev, bubble].slice(-50));
+          }
+        }
+
+        // Agent finished — final response (use message:done which has responseText)
+        if ((event.type === "message:done" || event.type === "chain_step_done") && agentId) {
+          setActiveAgents((prev) => {
+            const next = new Set(prev);
+            next.delete(agentId);
+            return next;
+          });
           const msg = (e.responseText as string) || "";
-          if (msg && agentId) {
+          if (msg) {
             const targets = extractTargets(msg);
             const bubble: SpeechBubble = {
               id: `${event.timestamp}-${Math.random().toString(36).slice(2, 6)}`,
@@ -396,6 +433,7 @@ export default function OfficePage() {
             const activeBubble = bubbles
               .filter((b) => b.agentId === id)
               .slice(-1)[0];
+            const isWorking = activeAgents.has(id);
 
             return (
               <div
@@ -406,7 +444,7 @@ export default function OfficePage() {
                   top: `${pos.y * 100}%`,
                   transform: "translate(-50%, -50%)",
                   zIndex: Math.floor(pos.y * 100) + 10,
-                  transition: "left 0.8s ease-in-out, top 0.8s ease-in-out",
+                  transition: "left 2s ease-in-out, top 2s ease-in-out",
                 }}
               >
                 {/* Speech bubble */}
@@ -414,18 +452,25 @@ export default function OfficePage() {
                   <SpeechBubbleEl bubble={activeBubble} />
                 )}
 
+                {/* Working indicator */}
+                {isWorking && !activeBubble && (
+                  <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 text-[10px] text-muted-foreground animate-pulse">
+                    💭
+                  </div>
+                )}
+
                 {/* Character sprite */}
                 <img
                   src={sprite}
                   alt={agent.name}
-                  className="w-[36px] h-auto mx-auto"
+                  className={`w-[36px] h-auto mx-auto ${isWorking ? "animate-bounce-subtle" : ""}`}
                   style={{ imageRendering: "pixelated" }}
                   draggable={false}
                 />
 
                 {/* Agent name label */}
-                <div className="text-[9px] text-center font-bold text-foreground mt-0.5 bg-background/80 px-1.5 py-0.5 whitespace-nowrap">
-                  @{id}
+                <div className={`text-[9px] text-center font-bold mt-0.5 px-1.5 py-0.5 whitespace-nowrap ${isWorking ? "text-primary bg-primary/10" : "text-foreground bg-background/80"}`}>
+                  @{id}{isWorking ? " ⚡" : ""}
                 </div>
               </div>
             );
