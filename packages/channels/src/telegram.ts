@@ -295,7 +295,8 @@ bot.getMe().then(async (me: TelegramBot.User) => {
         { command: 'agent', description: 'List available agents' },
         { command: 'team', description: 'List available teams' },
         { command: 'context', description: 'Show context window usage' },
-        { command: 'reset', description: 'Reset conversation history' },
+        { command: 'clear', description: 'Start fresh session for this topic\'s agent' },
+        { command: 'reset', description: 'Reset specific agent(s)' },
         { command: 'restart', description: 'Restart TinyAGI' },
     ]).catch((err: Error) => log('WARN', `Failed to register commands: ${err.message}`));
 
@@ -452,6 +453,29 @@ bot.on('message', async (msg: TelegramBot.Message) => {
         }
 
         // Check for context command
+        // Check for clear command — reset agent session for this topic
+        if (messageText.trim().match(/^[!/]clear$/i)) {
+            log('INFO', 'Clear command received');
+            try {
+                const chatKey = topicId ? `${senderId}_topic_${topicId}` : senderId;
+                const settingsData = JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8'));
+                const defaults = settingsData.channels?.defaults || {};
+                const agentId = defaults[chatKey];
+                if (!agentId) {
+                    await bot.sendMessage(msg.chat.id, 'No agent set for this chat. Send @agent_id first.', cmdOpts());
+                    return;
+                }
+                const workspacePath = settingsData?.workspace?.path || path.join(require('os').homedir(), 'tinyagi-workspace');
+                const flagDir = path.join(workspacePath, agentId);
+                if (!fs.existsSync(flagDir)) fs.mkdirSync(flagDir, { recursive: true });
+                fs.writeFileSync(path.join(flagDir, 'reset_flag'), 'reset');
+                await bot.sendMessage(msg.chat.id, `Session cleared for @${agentId}. Next message starts a fresh conversation.`, cmdOpts());
+            } catch (e) {
+                await bot.sendMessage(msg.chat.id, `Error: ${(e as Error).message}`, cmdOpts());
+            }
+            return;
+        }
+
         if (messageText.trim().match(/^[!/]context$/i)) {
             log('INFO', 'Context command received');
             try {
@@ -522,6 +546,10 @@ bot.on('message', async (msg: TelegramBot.Message) => {
             fullMessage = fullMessage ? `${fullMessage}\n\n${fileRefs}` : fileRefs;
         }
 
+        // Extract @agent prefix for parallel queue processing
+        const agentMatch = fullMessage.match(/^@(\S+)\s/);
+        const routedAgent = agentMatch ? agentMatch[1] : undefined;
+
         // Write to queue via API
         await fetch(`${API_BASE}/api/message`, {
             method: 'POST',
@@ -532,6 +560,7 @@ bot.on('message', async (msg: TelegramBot.Message) => {
                 senderId,
                 message: fullMessage,
                 messageId: queueMessageId,
+                ...(routedAgent ? { agent: routedAgent } : {}),
                 ...(topicId ? { messageThreadId: topicId } : {}),
             }),
         });
