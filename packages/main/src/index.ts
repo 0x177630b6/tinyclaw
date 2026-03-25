@@ -47,6 +47,7 @@ async function processMessage(dbMsg: any): Promise<void> {
         messageId: dbMsg.message_id,
         agent: dbMsg.agent ?? undefined,
         fromAgent: dbMsg.from_agent ?? undefined,
+        messageThreadId: dbMsg.message_thread_id ?? undefined,
     };
 
     const { channel, sender, message: rawMessage, messageId, agent: preRoutedAgent } = data;
@@ -104,7 +105,7 @@ async function processMessage(dbMsg: any): Promise<void> {
     try {
         response = await invokeAgent(agent, agentId, message, workspacePath, shouldReset, agents, teams, (text) => {
             log('INFO', `Agent ${agentId}: ${text}`);
-            emitEvent('agent_progress', { agentId, agentName: agent.name, text, messageId });
+            emitEvent('agent_progress', { agentId, agentName: agent.name, text, messageId, channel, senderId: data.senderId, messageThreadId: data.messageThreadId });
         });
     } catch (error) {
         const provider = agent.provider || 'anthropic';
@@ -138,6 +139,7 @@ async function processMessage(dbMsg: any): Promise<void> {
         await sendDirectResponse(response, {
             channel, sender, senderId: data.senderId,
             messageId, originalMessage: rawMessage, agentId,
+            messageThreadId: data.messageThreadId,
         });
     }
 }
@@ -146,7 +148,7 @@ async function processMessage(dbMsg: any): Promise<void> {
 
 async function sendDirectResponse(
     response: string,
-    ctx: { channel: string; sender: string; senderId?: string | null; messageId: string; originalMessage: string; agentId: string }
+    ctx: { channel: string; sender: string; senderId?: string | null; messageId: string; originalMessage: string; agentId: string; messageThreadId?: number }
 ): Promise<void> {
     await streamResponse(response, {
         channel: ctx.channel,
@@ -155,6 +157,7 @@ async function sendDirectResponse(
         messageId: ctx.messageId,
         originalMessage: ctx.originalMessage,
         agentId: ctx.agentId,
+        messageThreadId: ctx.messageThreadId,
     });
 }
 

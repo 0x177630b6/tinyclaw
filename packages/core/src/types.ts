@@ -86,7 +86,7 @@ export interface ResponseData {
 export const MODEL_ALIASES: Record<string, Record<string, string>> = {
     anthropic: {
         'sonnet': 'claude-sonnet-4-6',
-        'opus': 'claude-opus-4-6',
+        'opus': 'claude-opus-4-6[1m]',
     },
     openai: {},
     opencode: {
@@ -118,6 +118,7 @@ export interface MessageJobData {
     messageId: string;
     agent?: string;
     fromAgent?: string;
+    messageThreadId?: number;
 }
 
 export interface ResponseJobData {
@@ -130,4 +131,5 @@ export interface ResponseJobData {
     agent?: string;
     files?: string[];
     metadata?: Record<string, unknown>;
+    messageThreadId?: number;
 }

@@ -56,6 +56,7 @@ export async function streamResponse(response: string, options: {
     messageId: string;
     originalMessage: string;
     agentId: string;
+    messageThreadId?: number;
     transform?: (text: string) => string;
 }): Promise<void> {
     let finalResponse = response.trim();
@@ -86,8 +87,10 @@ export async function streamResponse(response: string, options: {
         agent: options.agentId,
         files: allFiles.length > 0 ? allFiles : undefined,
         metadata: Object.keys(metadata).length > 0 ? metadata : undefined,
+        messageThreadId: options.messageThreadId,
     });
 
     log('INFO', `@${options.agentId} responded:\n${finalResponse}`);
-    emitEvent('response_ready', { channel: options.channel, sender: options.sender, agentId: options.agentId, responseLength: finalResponse.length, responseText: finalResponse, messageId: options.messageId });
+    emitEvent('message:done', { channel: options.channel, sender: options.sender, agentId: options.agentId, responseLength: finalResponse.length, responseText: finalResponse, messageId: options.messageId });
+    emitEvent('response_ready', { channel: options.channel, sender: options.sender, agentId: options.agentId, messageId: options.messageId });
 }

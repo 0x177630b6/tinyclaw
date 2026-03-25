@@ -45,8 +45,25 @@ if (!TELEGRAM_BOT_TOKEN || TELEGRAM_BOT_TOKEN === 'your_token_here') {
 interface PendingMessage {
     chatId: number;
     messageId: number;
+    topicId?: number;
     timestamp: number;
 }
+
+interface ProgressTracker {
+    chatId: number;
+    topicId?: number;
+    telegramMsgId?: number;
+    lastEditTime: number;
+    pendingText: string | null;
+    editTimer: ReturnType<typeof setTimeout> | null;
+    allTexts: string[];
+}
+
+// Track chat IDs for senders (persists across pending message expiry)
+const senderRoutingMap = new Map<string, number>();
+
+// Track live progress messages being edited in Telegram
+const progressMessages = new Map<string, ProgressTracker>();
 
 function sanitizeFileName(fileName: string): string {
     const baseName = path.basename(fileName).replace(/[<>:"/\\|?*\x00-\x1f]/g, '_').trim();
@@ -277,6 +294,7 @@ bot.getMe().then(async (me: TelegramBot.User) => {
     await bot.setMyCommands([
         { command: 'agent', description: 'List available agents' },
         { command: 'team', description: 'List available teams' },
+        { command: 'context', description: 'Show context window usage' },
         { command: 'reset', description: 'Reset conversation history' },
         { command: 'restart', description: 'Restart TinyAGI' },
     ]).catch((err: Error) => log('WARN', `Failed to register commands: ${err.message}`));
@@ -290,10 +308,11 @@ bot.getMe().then(async (me: TelegramBot.User) => {
 // Message received - Write to queue
 bot.on('message', async (msg: TelegramBot.Message) => {
     try {
-        // Skip group/channel messages - only handle private chats
-        if (msg.chat.type !== 'private') {
+        // Allow private chats and forum topic messages (supergroup with thread)
+        if (msg.chat.type !== 'private' && !(msg.chat.type === 'supergroup' && msg.message_thread_id)) {
             return;
         }
+        const topicId = msg.message_thread_id;
 
         // Determine message text and any media files
         let messageText = msg.text || msg.caption || '';
@@ -378,13 +397,17 @@ bot.on('message', async (msg: TelegramBot.Message) => {
             return;
         }
 
+        const cmdOpts = (extra: object = {}) => ({
+            reply_to_message_id: msg.message_id,
+            ...(topicId ? { message_thread_id: topicId } : {}),
+            ...extra,
+        });
+
         // Check for agent list command
         if (msg.text && msg.text.trim().match(/^[!/]agent$/i)) {
             log('INFO', 'Agent list command received');
             const agentList = getAgentListText();
-            await bot.sendMessage(msg.chat.id, agentList, {
-                reply_to_message_id: msg.message_id,
-            });
+            await bot.sendMessage(msg.chat.id, agentList, cmdOpts());
             return;
         }
 
@@ -392,18 +415,14 @@ bot.on('message', async (msg: TelegramBot.Message) => {
         if (msg.text && msg.text.trim().match(/^[!/]team$/i)) {
             log('INFO', 'Team list command received');
             const teamList = getTeamListText();
-            await bot.sendMessage(msg.chat.id, teamList, {
-                reply_to_message_id: msg.message_id,
-            });
+            await bot.sendMessage(msg.chat.id, teamList, cmdOpts());
             return;
         }
 
         // Check for reset command: /reset @agent_id [@agent_id2 ...]
         const resetMatch = messageText.trim().match(/^[!/]reset\s+(.+)$/i);
         if (messageText.trim().match(/^[!/]reset$/i)) {
-            await bot.sendMessage(msg.chat.id, 'Usage: /reset @agent_id [@agent_id2 ...]\nSpecify which agent(s) to reset.', {
-                reply_to_message_id: msg.message_id,
-            });
+            await bot.sendMessage(msg.chat.id, 'Usage: /reset @agent_id [@agent_id2 ...]\nSpecify which agent(s) to reset.', cmdOpts());
             return;
         }
         if (resetMatch) {
@@ -425,13 +444,47 @@ bot.on('message', async (msg: TelegramBot.Message) => {
                     fs.writeFileSync(path.join(flagDir, 'reset_flag'), 'reset');
                     resetResults.push(`Reset @${agentId} (${agents[agentId].name}).`);
                 }
-                await bot.sendMessage(msg.chat.id, resetResults.join('\n'), {
-                    reply_to_message_id: msg.message_id,
-                });
+                await bot.sendMessage(msg.chat.id, resetResults.join('\n'), cmdOpts());
             } catch {
-                await bot.sendMessage(msg.chat.id, 'Could not process reset command. Check settings.', {
-                    reply_to_message_id: msg.message_id,
-                });
+                await bot.sendMessage(msg.chat.id, 'Could not process reset command. Check settings.', cmdOpts());
+            }
+            return;
+        }
+
+        // Check for context command
+        if (messageText.trim().match(/^[!/]context$/i)) {
+            log('INFO', 'Context command received');
+            try {
+                // Determine which agent is active for this chat/topic
+                const chatKey = topicId ? `${senderId}_topic_${topicId}` : senderId;
+                const settingsData = JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8'));
+                const defaults = settingsData.channels?.defaults || {};
+                const agentId = defaults[chatKey];
+                if (!agentId) {
+                    await bot.sendMessage(msg.chat.id, 'No agent set for this chat. Send @agent_id first.', cmdOpts());
+                    return;
+                }
+                const res = await fetch(`${API_BASE}/api/agents/${agentId}/usage`);
+                if (!res.ok) {
+                    await bot.sendMessage(msg.chat.id, `No usage data yet for @${agentId}. Send a message first.`, cmdOpts());
+                    return;
+                }
+                const usage = await res.json() as any;
+                const pct = usage.contextWindow > 0 ? Math.round((usage.contextUsed / usage.contextWindow) * 100) : 0;
+                const bar = '█'.repeat(Math.round(pct / 5)) + '░'.repeat(20 - Math.round(pct / 5));
+                const lines = [
+                    `@${agentId} — Context Window`,
+                    ``,
+                    `Model: ${usage.lastModel}`,
+                    `Session: ${usage.sessionId || 'unknown'}`,
+                    `Context: ${(usage.contextUsed / 1000).toFixed(1)}K / ${(usage.contextWindow / 1000).toFixed(0)}K tokens`,
+                    `[${bar}] ${pct}%`,
+                    `Cost: $${usage.costUSD?.toFixed(4) || '0'}`,
+                    usage.numTurns ? `Turns: ${usage.numTurns}` : '',
+                ].filter(Boolean);
+                await bot.sendMessage(msg.chat.id, lines.join('\n'), cmdOpts());
+            } catch (e) {
+                await bot.sendMessage(msg.chat.id, `Error fetching context: ${(e as Error).message}`, cmdOpts());
             }
             return;
         }
@@ -439,20 +492,19 @@ bot.on('message', async (msg: TelegramBot.Message) => {
         // Check for restart command
         if (messageText.trim().match(/^[!/]restart$/i)) {
             log('INFO', 'Restart command received');
-            await bot.sendMessage(msg.chat.id, 'Restarting TinyAGI...', {
-                reply_to_message_id: msg.message_id,
-            });
+            await bot.sendMessage(msg.chat.id, 'Restarting TinyAGI...', cmdOpts());
             const { exec } = require('child_process');
             exec(`"${path.join(SCRIPT_DIR, 'lib', 'tinyagi.sh')}" restart`, { detached: true, stdio: 'ignore' });
             return;
         }
 
-        // Apply default agent routing
+        // Apply topic-based agent routing first, then fall back to default agent
+        const chatKey = topicId ? `${senderId}_topic_${topicId}` : senderId;
         const { message: routedMessage, switchNotification } = applyDefaultAgent(
-            senderId, messageText, SETTINGS_FILE,
+            chatKey, messageText, SETTINGS_FILE,
         );
         if (switchNotification) {
-            await bot.sendMessage(msg.chat.id, switchNotification);
+            await bot.sendMessage(msg.chat.id, switchNotification, topicId ? { message_thread_id: topicId } : {});
         }
         if (routedMessage === null) {
             // Tag-only switch (e.g. "@coder") — no message to queue
@@ -461,7 +513,7 @@ bot.on('message', async (msg: TelegramBot.Message) => {
         messageText = routedMessage;
 
         // Show typing indicator
-        await bot.sendChatAction(msg.chat.id, 'typing');
+        await bot.sendChatAction(msg.chat.id, 'typing', topicId ? { message_thread_id: topicId } : undefined);
 
         // Build message text with file references
         let fullMessage = messageText;
@@ -480,22 +532,27 @@ bot.on('message', async (msg: TelegramBot.Message) => {
                 senderId,
                 message: fullMessage,
                 messageId: queueMessageId,
+                ...(topicId ? { messageThreadId: topicId } : {}),
             }),
         });
 
-        log('INFO', `Queued message ${queueMessageId}`);
+        log('INFO', `Queued message ${queueMessageId}${topicId ? ` (topic ${topicId})` : ''}`);
+
+        // Remember sender → chatId for fallback routing
+        senderRoutingMap.set(senderId, msg.chat.id);
 
         // Store pending message for response
         pendingMessages.set(queueMessageId, {
             chatId: msg.chat.id,
             messageId: msg.message_id,
+            topicId,
             timestamp: Date.now(),
         });
 
-        // Clean up old pending messages (older than 10 minutes)
-        const tenMinutesAgo = Date.now() - (10 * 60 * 1000);
+        // Clean up old pending messages (older than 30 minutes)
+        const thirtyMinutesAgo = Date.now() - (30 * 60 * 1000);
         for (const [id, data] of pendingMessages.entries()) {
-            if (data.timestamp < tenMinutesAgo) {
+            if (data.timestamp < thirtyMinutesAgo) {
                 pendingMessages.delete(id);
             }
         }
@@ -526,25 +583,33 @@ async function checkOutgoingQueue(): Promise<void> {
                 const senderId = resp.senderId;
                 const files: string[] = resp.files || [];
 
-                // Find pending message, or fall back to senderId for proactive messages
+                // Find pending message, or fall back to routing map (then senderId for DMs)
                 const pending = pendingMessages.get(messageId);
-                const targetChatId = pending?.chatId ?? (senderId ? Number(senderId) : null);
+                const targetChatId = pending?.chatId
+                    ?? (senderId ? senderRoutingMap.get(senderId) : undefined)
+                    ?? (senderId ? Number(senderId) : null);
 
                 if (targetChatId && !Number.isNaN(targetChatId)) {
+                    const threadId = pending?.topicId ?? resp.messageThreadId ?? undefined;
+
+                    // Clean up progress tracker
+                    progressMessages.delete(messageId);
+
                     // Send any attached files first
                     if (files.length > 0) {
                         for (const file of files) {
                             try {
                                 if (!fs.existsSync(file)) continue;
                                 const ext = path.extname(file).toLowerCase();
+                                const threadOpts = threadId ? { message_thread_id: threadId } : {};
                                 if (['.jpg', '.jpeg', '.png', '.gif', '.webp'].includes(ext)) {
-                                    await bot.sendPhoto(targetChatId, file);
+                                    await bot.sendPhoto(targetChatId, file, threadOpts);
                                 } else if (['.mp3', '.ogg', '.wav', '.m4a'].includes(ext)) {
-                                    await bot.sendAudio(targetChatId, file);
+                                    await bot.sendAudio(targetChatId, file, threadOpts);
                                 } else if (['.mp4', '.avi', '.mov', '.webm'].includes(ext)) {
-                                    await bot.sendVideo(targetChatId, file);
+                                    await bot.sendVideo(targetChatId, file, threadOpts);
                                 } else {
-                                    await bot.sendDocument(targetChatId, file);
+                                    await bot.sendDocument(targetChatId, file, threadOpts);
                                 }
                                 log('INFO', `Sent file to Telegram: ${path.basename(file)}`);
                             } catch (fileErr) {
@@ -559,14 +624,19 @@ async function checkOutgoingQueue(): Promise<void> {
                         const parseMode = resp.metadata?.parseMode as TelegramBot.ParseMode | undefined;
 
                         if (chunks.length > 0) {
-                            const opts: TelegramBot.SendMessageOptions = pending
-                                ? { reply_to_message_id: pending.messageId }
-                                : {};
+                            const opts: TelegramBot.SendMessageOptions = {
+                                ...(pending ? { reply_to_message_id: pending.messageId } : {}),
+                                ...(threadId ? { message_thread_id: threadId } : {}),
+                            };
                             if (parseMode) opts.parse_mode = parseMode;
                             await sendTelegramMessage(targetChatId, chunks[0]!, opts);
                         }
                         for (let i = 1; i < chunks.length; i++) {
-                            await sendTelegramMessage(targetChatId, chunks[i]!, parseMode ? { parse_mode: parseMode } : {});
+                            const opts: TelegramBot.SendMessageOptions = {
+                                ...(threadId ? { message_thread_id: threadId } : {}),
+                                ...(parseMode ? { parse_mode: parseMode } : {}),
+                            };
+                            await sendTelegramMessage(targetChatId, chunks[i]!, opts);
                         }
                     }
 
@@ -591,12 +661,42 @@ async function checkOutgoingQueue(): Promise<void> {
     }
 }
 
-// SSE-driven response delivery (replaces 1s polling)
+// SSE-driven response delivery + live progress streaming
 createSSEClient({
     port: API_PORT,
     onEvent: (eventType, data) => {
-        if (eventType === 'response_ready' && data.channel === 'telegram') {
+        if ((eventType === 'response_ready' || eventType === 'message:done') && data.channel === 'telegram') {
             checkOutgoingQueue();
+        }
+
+        // Live progress: send each intermediate reasoning as a separate message
+        if (eventType === 'agent_progress' && data.channel === 'telegram') {
+            const messageId = data.messageId as string;
+            const text = data.text as string;
+            if (!text || !messageId) return;
+
+            // Resolve chat target: pendingMessages first, then SSE event data
+            const pending = pendingMessages.get(messageId);
+            const senderId = data.senderId as string | undefined;
+            const chatId = pending?.chatId
+                ?? (senderId ? senderRoutingMap.get(senderId) : undefined)
+                ?? (senderId ? Number(senderId) : undefined);
+            const topicId = pending?.topicId ?? (data.messageThreadId as number | undefined);
+
+            if (!chatId) return;
+
+            // Truncate for Telegram limit
+            const MAX_LEN = 4000;
+            const displayText = text.length > MAX_LEN
+                ? text.substring(0, MAX_LEN) + '\n\n_(truncated)_'
+                : text;
+
+            const opts: TelegramBot.SendMessageOptions = {
+                ...(topicId ? { message_thread_id: topicId } : {}),
+            };
+            sendTelegramMessage(chatId, `⏳ ${displayText}`, opts)
+                .then(() => log('INFO', `Sent progress (${text.length} chars)`))
+                .catch((e: Error) => log('WARN', `Progress send failed: ${e.message}`));
         }
     },
     onConnect: () => {
@@ -608,7 +708,7 @@ createSSEClient({
 // Refresh typing indicator every 4 seconds for pending messages
 setInterval(() => {
     for (const [, data] of pendingMessages.entries()) {
-        bot.sendChatAction(data.chatId, 'typing').catch(() => {
+        bot.sendChatAction(data.chatId, 'typing', data.topicId ? { message_thread_id: data.topicId } : undefined).catch(() => {
             // Ignore typing errors silently
         });
     }

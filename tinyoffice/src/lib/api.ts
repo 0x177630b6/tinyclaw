@@ -126,6 +126,21 @@ export async function getAgents(): Promise<Record<string, AgentConfig>> {
   return apiFetch("/api/agents");
 }
 
+export interface AgentUsageStats {
+  sessionId?: string;
+  contextWindow: number;
+  contextUsed: number;
+  lastModel: string;
+  costUSD: number;
+  numTurns?: number;
+  durationMs?: number;
+  updatedAt: number;
+}
+
+export async function getAllAgentUsage(): Promise<Record<string, AgentUsageStats>> {
+  return apiFetch("/api/agents/usage");
+}
+
 export async function getTeams(): Promise<Record<string, TeamConfig>> {
   return apiFetch("/api/teams");
 }

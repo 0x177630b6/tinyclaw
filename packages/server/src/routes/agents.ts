@@ -4,7 +4,7 @@ import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { Hono } from 'hono';
 import { AgentConfig, CustomProvider } from '@tinyagi/core';
-import { getSettings, getAgents, ensureAgentDirectory } from '@tinyagi/core';
+import { getSettings, getAgents, ensureAgentDirectory, getAllAgentUsage, getAgentUsage } from '@tinyagi/core';
 import { log } from '@tinyagi/core';
 import { mutateSettings } from './settings';
 
@@ -36,6 +36,18 @@ async function runSkills(args: string[], cwd: string): Promise<string> {
 // GET /api/agents
 app.get('/api/agents', (c) => {
     return c.json(getAgents(getSettings()));
+});
+
+// GET /api/agents/usage — context window + session info for all agents
+app.get('/api/agents/usage', (c) => {
+    return c.json(getAllAgentUsage());
+});
+
+// GET /api/agents/:id/usage — context window + session info for one agent
+app.get('/api/agents/:id/usage', (c) => {
+    const usage = getAgentUsage(c.req.param('id'));
+    if (!usage) return c.json({ error: 'No usage data yet' }, 404);
+    return c.json(usage);
 });
 
 // PUT /api/agents/:id

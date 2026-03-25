@@ -6,6 +6,42 @@ import { SCRIPT_DIR, resolveModel, getSettings } from './config';
 import { log } from './logging';
 import { ensureAgentDirectory, buildSystemPrompt } from './agent';
 
+// ── Per-agent usage stats (persisted to disk, updated on each result event) ──
+
+export interface AgentUsageStats {
+    sessionId?: string;
+    contextWindow: number;
+    contextUsed: number;
+    lastModel: string;
+    costUSD: number;
+    numTurns?: number;
+    durationMs?: number;
+    updatedAt: number;
+}
+
+const USAGE_FILE = path.join(process.env.TINYAGI_HOME || path.join(require('os').homedir(), '.tinyagi'), 'agent-usage.json');
+const agentUsage = new Map<string, AgentUsageStats>();
+
+// Load persisted usage on startup
+try {
+    if (fs.existsSync(USAGE_FILE)) {
+        const data = JSON.parse(fs.readFileSync(USAGE_FILE, 'utf8'));
+        for (const [k, v] of Object.entries(data)) agentUsage.set(k, v as AgentUsageStats);
+    }
+} catch { /* ignore corrupt file */ }
+
+function persistUsage(): void {
+    try { fs.writeFileSync(USAGE_FILE, JSON.stringify(Object.fromEntries(agentUsage), null, 2)); } catch { /* best effort */ }
+}
+
+export function getAgentUsage(agentId: string): AgentUsageStats | undefined {
+    return agentUsage.get(agentId);
+}
+
+export function getAllAgentUsage(): Record<string, AgentUsageStats> {
+    return Object.fromEntries(agentUsage);
+}
+
 export async function runCommand(command: string, args: string[], cwd?: string, envOverrides?: Record<string, string>): Promise<string> {
     return new Promise((resolve, reject) => {
         const env = { ...process.env, ...envOverrides };
@@ -121,8 +157,6 @@ function extractClaudeEventText(json: any): string | null {
         for (const block of json.message.content) {
             if (block.type === 'text' && block.text) {
                 parts.push(block.text);
-            } else if (block.type === 'tool_use' && block.name) {
-                parts.push(`[tool: ${block.name}]`);
             }
         }
         return parts.length > 0 ? parts.join('\n') : null;
@@ -386,6 +420,21 @@ export async function invokeAgent(
                         // Log raw usage stats from the result event
                         if (json.usage) log('INFO', `Claude usage (${agentId}): ${JSON.stringify(json.usage)}`);
                         if (json.modelUsage) log('INFO', `Claude model usage (${agentId}): ${JSON.stringify(json.modelUsage)}`);
+                        // Store usage stats for API/Telegram access
+                        const mu = json.modelUsage ? Object.values(json.modelUsage)[0] as any : null;
+                        if (mu) {
+                            agentUsage.set(agentId, {
+                                sessionId: json.session_id,
+                                contextWindow: mu.contextWindow || 0,
+                                contextUsed: (mu.cacheCreationInputTokens || 0) + (mu.inputTokens || 0),
+                                lastModel: Object.keys(json.modelUsage)[0] || '',
+                                costUSD: mu.costUSD || 0,
+                                numTurns: json.num_turns,
+                                durationMs: json.duration_ms,
+                                updatedAt: Date.now(),
+                            });
+                            persistUsage();
+                        }
                         return;
                     }
                     const text = extractClaudeEventText(json);

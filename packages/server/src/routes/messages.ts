@@ -6,9 +6,9 @@ const app = new Hono();
 // POST /api/message
 app.post('/api/message', async (c) => {
     const body = await c.req.json();
-    const { message, agent, sender, senderId, channel, messageId: clientMessageId } = body as {
+    const { message, agent, sender, senderId, channel, messageId: clientMessageId, messageThreadId } = body as {
         message?: string; agent?: string; sender?: string; senderId?: string;
-        channel?: string; messageId?: string;
+        channel?: string; messageId?: string; messageThreadId?: number;
     };
 
     if (!message || typeof message !== 'string') {
@@ -26,6 +26,7 @@ app.post('/api/message', async (c) => {
         message,
         messageId,
         agent: agent || undefined,
+        messageThreadId: messageThreadId || undefined,
     });
 
     if (rowId === null) {
@@ -33,7 +34,7 @@ app.post('/api/message', async (c) => {
     }
 
     log('INFO', `[API] Message enqueued: ${message}`);
-    emitEvent('message_enqueued', {
+    emitEvent('message:incoming', {
         messageId,
         agent: agent || null,
         channel: resolvedChannel,

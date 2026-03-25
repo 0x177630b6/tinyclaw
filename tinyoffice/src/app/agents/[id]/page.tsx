@@ -10,7 +10,9 @@ import {
   getAgentMemory,
   getAgentHeartbeat,
   saveAgentHeartbeat,
+  getAllAgentUsage,
   type AgentConfig,
+  type AgentUsageStats,
   type WorkspaceSkill,
 } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -71,6 +73,11 @@ export default function AgentConfigPage({
     getAgents,
     0,
   );
+  const { data: allUsage } = usePolling<Record<string, AgentUsageStats>>(
+    getAllAgentUsage,
+    10000,
+  );
+  const usage = allUsage?.[agentId];
 
   const [activeTab, setActiveTab] = useState<TabId>("chat");
   const [spSaving, setSpSaving] = useState(false);
@@ -248,7 +255,36 @@ export default function AgentConfigPage({
             </div>
           </div>
         </div>
-
+        {usage && (
+          <div className="flex items-center gap-3 text-xs text-muted-foreground">
+            <div className="flex flex-col items-end gap-0.5">
+              <div className="flex items-center gap-2">
+                <span className="font-mono">{usage.lastModel}</span>
+                {usage.sessionId && (
+                  <Badge variant="outline" className="text-[9px] font-mono">
+                    {usage.sessionId.slice(0, 8)}
+                  </Badge>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="w-32 h-1.5 bg-muted rounded-full overflow-hidden">
+                  <div
+                    className={cn(
+                      "h-full rounded-full transition-all",
+                      usage.contextWindow > 0 && (usage.contextUsed / usage.contextWindow) > 0.8
+                        ? "bg-red-500"
+                        : (usage.contextUsed / usage.contextWindow) > 0.5
+                        ? "bg-yellow-500"
+                        : "bg-green-500"
+                    )}
+                    style={{ width: `${Math.min(100, Math.round((usage.contextUsed / usage.contextWindow) * 100))}%` }}
+                  />
+                </div>
+                <span>{(usage.contextUsed / 1000).toFixed(1)}K / {(usage.contextWindow / 1000).toFixed(0)}K</span>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Tabs */}

@@ -5,6 +5,7 @@ import {
     ackResponse, enqueueResponse,
     getDeadMessages, retryDeadMessage, deleteDeadMessage,
 } from '@tinyagi/core';
+import { broadcastSSE } from '../sse';
 
 export function createQueueRoutes() {
     const app = new Hono();
@@ -56,15 +57,17 @@ export function createQueueRoutes() {
             agent: r.agent,
             files: r.files ? JSON.parse(r.files) : undefined,
             metadata: r.metadata ? JSON.parse(r.metadata) : undefined,
+            messageThreadId: r.message_thread_id ?? undefined,
         })));
     });
 
     // POST /api/responses — enqueue a proactive outgoing message
     app.post('/api/responses', async (c) => {
         const body = await c.req.json();
-        const { channel, sender, senderId, message, agent, files } = body as {
+        const { channel, sender, senderId, message, agent, files, messageThreadId } = body as {
             channel?: string; sender?: string; senderId?: string;
             message?: string; agent?: string; files?: string[];
+            messageThreadId?: number;
         };
 
         if (!channel || !sender || !message) {
@@ -81,8 +84,11 @@ export function createQueueRoutes() {
             messageId,
             agent,
             files: files && files.length > 0 ? files : undefined,
+            messageThreadId,
         });
 
+        // Notify channel clients (e.g. Telegram) so they pick up the response immediately
+        broadcastSSE('message:done', { channel, sender, agentId: agent ?? 'proactive', responseLength: message.length, messageId });
         log('INFO', `[API] Proactive response enqueued for ${channel}/${sender}`);
         return c.json({ ok: true, messageId });
     });
