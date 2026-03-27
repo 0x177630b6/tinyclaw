@@ -3,6 +3,7 @@ import { TeamConfig } from '@tinyagi/core';
 import { getSettings, getTeams } from '@tinyagi/core';
 import { log } from '@tinyagi/core';
 import { mutateSettings } from './settings';
+import { broadcastChange } from '../sse';
 
 const app = new Hono();
 
@@ -27,6 +28,7 @@ app.put('/api/teams/:id', async (c) => {
         };
     });
     log('INFO', `[API] Team '${teamId}' saved`);
+    broadcastChange('teams:changed');
     return c.json({ ok: true, team: settings.teams![teamId] });
 });
 
@@ -39,6 +41,7 @@ app.delete('/api/teams/:id', (c) => {
     }
     mutateSettings(s => { delete s.teams![teamId]; });
     log('INFO', `[API] Team '${teamId}' deleted`);
+    broadcastChange('teams:changed');
     return c.json({ ok: true });
 });
 

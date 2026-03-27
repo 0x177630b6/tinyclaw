@@ -9,6 +9,7 @@ import {
 } from "@/components/agent/skills-constellation";
 import { searchRegistrySkills, installRegistrySkill } from "@/lib/api";
 import { RefreshCw, Swords } from "lucide-react";
+import { toast } from "sonner";
 
 export function SkillsTab({
   skills,
@@ -67,9 +68,11 @@ export function SkillsTab({
     setInstallMessage(null);
     try {
       await installRegistrySkill(agentId, ref);
+      toast.success(`Installed ${ref}`);
       setInstallMessage(`Installed ${ref}.`);
       onRefresh();
     } catch (err) {
+      toast.error("Failed to install skill");
       setRegistryError((err as Error).message);
     } finally {
       setInstallingRef(null);

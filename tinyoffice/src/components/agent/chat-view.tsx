@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { usePolling, timeAgo } from "@/lib/hooks";
+import { useSSEPolling, timeAgo } from "@/lib/hooks";
 import {
   getAgentMessages,
   sendMessage,
@@ -83,7 +83,7 @@ export function AgentChatView({
   }, [agentId]);
 
   const { data: polledMessages, error: pollError } =
-    usePolling<AgentMessage[]>(fetchMessages, 2000, [agentId]);
+    useSSEPolling<AgentMessage[]>(fetchMessages, 30000, ["agent:response", "message:done"], [agentId]);
 
   useEffect(() => {
     if (!polledMessages) return;

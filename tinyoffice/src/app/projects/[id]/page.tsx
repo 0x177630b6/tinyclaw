@@ -3,7 +3,7 @@
 import { use, useState, useCallback, useMemo } from "react";
 import Link from "next/link";
 import type { UniqueIdentifier } from "@dnd-kit/core";
-import { usePolling } from "@/lib/hooks";
+import { usePolling, useSSEPolling } from "@/lib/hooks";
 import {
   getTasks, createTask, updateTask, deleteTask, reorderTasks, sendMessage,
   getAgents, getTeams, getProjects,
@@ -45,10 +45,10 @@ export default function ProjectDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const { id: projectId } = use(params);
-  const { data: allTasks, refresh: refreshTasks } = usePolling<Task[]>(getTasks, 3000);
+  const { data: allTasks, refresh: refreshTasks } = useSSEPolling<Task[]>(getTasks, 30000, ["tasks:changed"]);
   const { data: agents } = usePolling<Record<string, AgentConfig>>(getAgents, 0);
   const { data: teams } = usePolling<Record<string, TeamConfig>>(getTeams, 0);
-  const { data: projects } = usePolling<Project[]>(getProjects, 5000);
+  const { data: projects } = useSSEPolling<Project[]>(getProjects, 30000, ["projects:changed"]);
 
   const project = projects?.find((p) => p.id === projectId);
   const tasks = useMemo(

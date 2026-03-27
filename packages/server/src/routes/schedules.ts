@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import { getSchedules, addSchedule, removeSchedule, updateSchedule } from '@tinyagi/core';
+import { broadcastChange } from '../sse';
 
 const app = new Hono();
 
@@ -41,6 +42,7 @@ app.post('/api/schedules', async (c) => {
             sender: body.sender,
             enabled: body.enabled,
         });
+        broadcastChange('schedules:changed');
         return c.json({ ok: true, schedule });
     } catch (err) {
         return c.json({ error: (err as Error).message }, 400);
@@ -65,6 +67,7 @@ app.put('/api/schedules/:id', async (c) => {
         if (!schedule) {
             return c.json({ error: `schedule '${id}' not found` }, 404);
         }
+        broadcastChange('schedules:changed');
         return c.json({ ok: true, schedule });
     } catch (err) {
         return c.json({ error: (err as Error).message }, 400);
@@ -78,6 +81,7 @@ app.delete('/api/schedules/:id', (c) => {
     if (!deleted) {
         return c.json({ error: `schedule '${id}' not found` }, 404);
     }
+    broadcastChange('schedules:changed');
     return c.json({ ok: true });
 });
 

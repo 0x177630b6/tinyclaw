@@ -51,6 +51,7 @@ function agentColor(id: string): string {
   return AGENT_COLORS[Math.abs(hash) % AGENT_COLORS.length];
 }
 import Link from "next/link";
+import { toast } from "sonner";
 
 type TabId = "chat" | "activity" | "skills" | "schedule" | "system-prompt" | "memory" | "heartbeat";
 
@@ -150,10 +151,11 @@ export default function AgentConfigPage({
     setSpSaving(true);
     try {
       await saveAgentSystemPrompt(agentId, systemPromptContent);
+      toast.success("System prompt saved");
       setSpSaved(true);
       setTimeout(() => setSpSaved(false), 2000);
     } catch {
-      // Error handling
+      toast.error("Failed to save system prompt");
     } finally {
       setSpSaving(false);
     }
@@ -168,10 +170,11 @@ export default function AgentConfigPage({
         enabled: heartbeatEnabled,
         interval: parseInt(heartbeatInterval) || 300,
       });
+      toast.success("Heartbeat settings saved");
       setHbSaved(true);
       setTimeout(() => setHbSaved(false), 2000);
     } catch {
-      // Error handling
+      toast.error("Failed to save heartbeat settings");
     } finally {
       setHbSaving(false);
     }

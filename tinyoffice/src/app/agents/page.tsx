@@ -14,6 +14,7 @@ import {
   X, Check, Loader2, Swords,
 } from "lucide-react";
 import Link from "next/link";
+import { toast } from "sonner";
 
 type FormData = {
   id: string;
@@ -74,9 +75,11 @@ export default function AgentsPage() {
         name, provider, model,
         ...(system_prompt ? { system_prompt } : {}),
       });
+      toast.success(isNew ? "Agent created" : "Agent updated");
       setEditing(null);
       refresh();
     } catch (err) {
+      toast.error("Failed to save agent");
       setError((err as Error).message);
     } finally {
       setSaving(false);
@@ -87,8 +90,10 @@ export default function AgentsPage() {
     setDeleting(id);
     try {
       await deleteAgent(id);
+      toast.success("Agent deleted");
       refresh();
     } catch (err) {
+      toast.error("Failed to delete agent");
       setError((err as Error).message);
     } finally {
       setDeleting(null);
@@ -292,7 +297,7 @@ function AgentCard({
             </div>
           </div>
           <div className="flex items-center gap-1">
-            <Button variant="ghost" size="icon" onClick={onEdit} className="h-8 w-8">
+            <Button variant="ghost" size="icon" onClick={onEdit} className="h-8 w-8" aria-label={`Edit agent ${agent.name}`}>
               <Pencil className="h-3.5 w-3.5" />
             </Button>
             {confirmDelete ? (
@@ -311,7 +316,7 @@ function AgentCard({
                 </Button>
               </div>
             ) : (
-              <Button variant="ghost" size="icon" onClick={() => setConfirmDelete(true)} className="h-8 w-8 text-muted-foreground hover:text-destructive">
+              <Button variant="ghost" size="icon" onClick={() => setConfirmDelete(true)} className="h-8 w-8 text-muted-foreground hover:text-destructive" aria-label={`Delete agent ${agent.name}`}>
                 <Trash2 className="h-3.5 w-3.5" />
               </Button>
             )}

@@ -5,6 +5,7 @@ import { X, Check, Loader2 } from "lucide-react";
 import { createTask } from "@/lib/api";
 import type { AgentConfig, TeamConfig, Project } from "@/lib/api";
 import { TaskForm, emptyForm, type TaskFormData } from "./task-form";
+import { toast } from "sonner";
 
 interface CreateTaskModalProps {
   agents: Record<string, AgentConfig>;
@@ -41,9 +42,11 @@ export function CreateTaskModal({
         status: "backlog",
         ...(form.projectId ? { projectId: form.projectId } : {}),
       });
+      toast.success("Task created");
       onCreated();
       onClose();
     } catch (err) {
+      toast.error("Failed to create task");
       setError((err as Error).message);
     } finally {
       setSaving(false);

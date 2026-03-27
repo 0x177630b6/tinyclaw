@@ -18,6 +18,14 @@ export default function OfficePage() {
 
   const [archivePanel, setArchivePanel] = useState<ArchivePanelId | null>(null);
 
+  if (!data.agents) {
+    return (
+      <div className="flex h-full items-center justify-center">
+        <div className="h-8 w-8 animate-spin rounded-full border-4 border-neutral-300 border-t-neutral-600" />
+      </div>
+    );
+  }
+
   return (
     <div className="flex h-full flex-col">
       <div className="flex-1 overflow-hidden bg-[#3b3a37] p-3">

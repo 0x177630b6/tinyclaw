@@ -10,7 +10,7 @@ import { writeDefaults, TINYAGI_HOME } from '../lib/defaults.mjs';
 
 const INSTALL_DIR = TINYAGI_HOME;
 const GITHUB_REPO = 'TinyAGI/tinyagi';
-const PORTAL_URL = 'https://office.tinyagicompany.com';
+const PORTAL_URL = 'http://localhost:3000';
 
 const GREEN = '\x1b[32m';
 const YELLOW = '\x1b[33m';

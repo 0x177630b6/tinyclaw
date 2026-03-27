@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { usePolling, useSSE, timeAgo } from "@/lib/hooks";
+import { useSSEPolling, useSSE, timeAgo } from "@/lib/hooks";
 import { getLogs, type EventData } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -10,9 +10,10 @@ import { ScrollText, Activity, RefreshCw } from "lucide-react";
 
 export default function LogsPage() {
   const [tab, setTab] = useState<"logs" | "events">("logs");
-  const { data: logs, refresh: refreshLogs } = usePolling<{ lines: string[] }>(
+  const { data: logs, refresh: refreshLogs } = useSSEPolling<{ lines: string[] }>(
     () => getLogs(200),
-    5000
+    30000,
+    ["message:incoming", "agent:response", "message:done"]
   );
   const { events } = useSSE(100);
 

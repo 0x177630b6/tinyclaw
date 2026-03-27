@@ -1,6 +1,6 @@
 "use client";
 
-import { usePolling, useSSE, timeAgo } from "@/lib/hooks";
+import { useSSEPolling, useSSE, timeAgo } from "@/lib/hooks";
 import {
   getAgents,
   getTeams,
@@ -23,9 +23,9 @@ import {
 } from "lucide-react";
 
 export default function DashboardPage() {
-  const { data: agents } = usePolling<Record<string, AgentConfig>>(getAgents, 0);
-  const { data: teams } = usePolling<Record<string, TeamConfig>>(getTeams, 0);
-  const { data: queue } = usePolling<QueueStatus>(getQueueStatus, 2000);
+  const { data: agents } = useSSEPolling<Record<string, AgentConfig>>(getAgents, 60000, ["agents:changed"]);
+  const { data: teams } = useSSEPolling<Record<string, TeamConfig>>(getTeams, 60000, ["teams:changed"]);
+  const { data: queue } = useSSEPolling<QueueStatus>(getQueueStatus, 30000, ["message:incoming", "agent:response", "message:done"]);
   const { events } = useSSE(30);
 
   const agentCount = agents ? Object.keys(agents).length : 0;

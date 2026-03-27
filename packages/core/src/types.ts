@@ -33,7 +33,7 @@ export interface Settings {
     channels?: {
         enabled?: string[];
         discord?: { bot_token?: string };
-        telegram?: { bot_token?: string };
+        telegram?: { bot_token?: string; topic_agents?: Record<string, string> };
         whatsapp?: {};
         defaults?: Record<string, { agentId: string }>;
     };
@@ -68,6 +68,7 @@ export interface MessageData {
     messageId: string;
     agent?: string; // optional: pre-routed agent id from channel client
     fromAgent?: string; // which agent sent this internal message
+    messageThreadId?: number; // Telegram forum topic ID
 }
 
 export interface ResponseData {
@@ -80,6 +81,7 @@ export interface ResponseData {
     agent?: string; // which agent handled this
     files?: string[];
     metadata?: Record<string, unknown>;
+    messageThreadId?: number; // Telegram forum topic ID
 }
 
 // Shorthand model aliases — everything else passes through as-is to the CLI.
@@ -118,6 +120,7 @@ export interface MessageJobData {
     messageId: string;
     agent?: string;
     fromAgent?: string;
+    messageThreadId?: number;
 }
 
 export interface ResponseJobData {
@@ -130,4 +133,5 @@ export interface ResponseJobData {
     agent?: string;
     files?: string[];
     metadata?: Record<string, unknown>;
+    messageThreadId?: number;
 }

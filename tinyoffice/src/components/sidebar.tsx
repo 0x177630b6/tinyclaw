@@ -28,7 +28,7 @@ function agentColor(agentId: string): string {
   return AGENT_COLORS[Math.abs(hash) % AGENT_COLORS.length];
 }
 
-export function Sidebar() {
+export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   const pathname = usePathname();
   const { resolvedTheme, setTheme } = useTheme();
   const { data: agents } = usePolling<Record<string, AgentConfig>>(getAgents, 0);
@@ -37,8 +37,14 @@ export function Sidebar() {
   const agentEntries = agents ? Object.entries(agents) : [];
   const teamEntries = teams ? Object.entries(teams) : [];
 
+  const handleClick = (e: React.MouseEvent) => {
+    if (onNavigate && (e.target as HTMLElement).closest("a")) {
+      onNavigate();
+    }
+  };
+
   return (
-    <aside className="flex h-screen w-64 flex-col border-r bg-card">
+    <aside className="flex h-screen w-64 flex-col border-r bg-card" onClick={handleClick}>
       {/* Header */}
       <div className="flex items-center gap-2.5 px-4 pt-4 pb-2">
         <Image src="/icon.png" alt="TinyAGI" width={24} height={24} className="h-6 w-6" />
@@ -47,6 +53,7 @@ export function Sidebar() {
           onClick={() => setTheme(resolvedTheme === "dark" ? "light" : "dark")}
           className="p-1 text-muted-foreground hover:text-foreground transition-colors"
           title={resolvedTheme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+          aria-label={resolvedTheme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
         >
           {resolvedTheme === "dark" ? (
             <Sun className="h-3.5 w-3.5" />
@@ -96,6 +103,7 @@ export function Sidebar() {
               href="/agents"
               className="text-muted-foreground hover:text-foreground transition-colors p-0.5"
               title="Manage agents"
+              aria-label="Manage agents"
             >
               <SlidersHorizontal className="h-3 w-3" />
             </Link>
@@ -153,6 +161,7 @@ export function Sidebar() {
               href="/teams"
               className="text-muted-foreground hover:text-foreground transition-colors p-0.5"
               title="Manage teams"
+              aria-label="Manage teams"
             >
               <SlidersHorizontal className="h-3 w-3" />
             </Link>

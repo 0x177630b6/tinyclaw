@@ -40,6 +40,7 @@ import {
   X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { toast } from "sonner";
 
 function cronNextOccurrences(cron: string, count: number): Date[] {
   const fields = cron.trim().split(/\s+/);
@@ -246,8 +247,10 @@ export function ScheduleTab({ agentId }: { agentId: string }) {
       setFormRunAtTime("09:00");
       setFormMessage("");
       setFormLabel("");
+      toast.success("Schedule created");
       loadSchedules();
     } catch (err) {
+      toast.error("Failed to create schedule");
       setFormError((err as Error).message);
     } finally {
       setFormSaving(false);
@@ -257,8 +260,11 @@ export function ScheduleTab({ agentId }: { agentId: string }) {
   const handleDelete = async (id: string) => {
     try {
       await deleteSchedule(id);
+      toast.success("Schedule deleted");
       loadSchedules();
-    } catch { /* ignore */ }
+    } catch {
+      toast.error("Failed to delete schedule");
+    }
   };
 
   // Convert schedules to calendar data

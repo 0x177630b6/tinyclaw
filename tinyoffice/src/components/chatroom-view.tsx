@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { usePolling, timeAgo } from "@/lib/hooks";
+import { usePolling, useSSEPolling, timeAgo } from "@/lib/hooks";
 import {
   getChatMessages, postChatMessage, getAgents,
   type ChatMessage, type AgentConfig,
@@ -52,7 +52,7 @@ export function ChatRoomView({
     return [...msgs].reverse();
   }, [teamId]);
 
-  const { data: polledMessages } = usePolling<ChatMessage[]>(fetchMessages, 2000, [teamId]);
+  const { data: polledMessages } = useSSEPolling<ChatMessage[]>(fetchMessages, 30000, ["agent:response", "message:done"], [teamId]);
 
   useEffect(() => {
     if (polledMessages) {

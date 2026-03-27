@@ -429,6 +429,8 @@ export function subscribeToEvents(
   const types = eventTypes ?? [
     "message:incoming", "agent:invoke", "agent:progress",
     "agent:response", "agent:mention", "message:done",
+    "tasks:changed", "projects:changed", "settings:changed",
+    "agents:changed", "teams:changed", "schedules:changed",
   ];
   for (const type of types) {
     es.addEventListener(type, handler);

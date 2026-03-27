@@ -5,6 +5,7 @@ import { X, Check, Loader2 } from "lucide-react";
 import { updateTask } from "@/lib/api";
 import type { Task, AgentConfig, TeamConfig, Project } from "@/lib/api";
 import { TaskForm, type TaskFormData } from "./task-form";
+import { toast } from "sonner";
 
 interface EditTaskModalProps {
   task: Task;
@@ -48,9 +49,11 @@ export function EditTaskModal({
         assigneeType: form.assignee ? form.assigneeType : "",
         projectId: form.projectId || undefined,
       });
+      toast.success("Task updated");
       onSaved();
       onClose();
     } catch (err) {
+      toast.error("Failed to update task");
       setError((err as Error).message);
     } finally {
       setSaving(false);

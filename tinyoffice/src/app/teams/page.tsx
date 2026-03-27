@@ -14,6 +14,7 @@ import {
   Users, Crown, Bot, ArrowRight, Plus, Pencil, Trash2,
   X, Check, Loader2,
 } from "lucide-react";
+import { toast } from "sonner";
 
 type FormData = {
   id: string;
@@ -77,9 +78,11 @@ export default function TeamsPage() {
     setError("");
     try {
       await saveTeam(id.toLowerCase(), { name, agents: teamAgents, leader_agent });
+      toast.success(isNew ? "Team created" : "Team updated");
       setEditing(null);
       refresh();
     } catch (err) {
+      toast.error("Failed to save team");
       setError((err as Error).message);
     } finally {
       setSaving(false);
@@ -90,8 +93,10 @@ export default function TeamsPage() {
     setDeleting(id);
     try {
       await deleteTeam(id);
+      toast.success("Team deleted");
       refresh();
     } catch (err) {
+      toast.error("Failed to delete team");
       setError((err as Error).message);
     } finally {
       setDeleting(null);
@@ -384,7 +389,7 @@ function TeamCard({
             <Badge variant="outline">
               {team.agents.length} agent{team.agents.length !== 1 ? "s" : ""}
             </Badge>
-            <Button variant="ghost" size="icon" onClick={onEdit} className="h-8 w-8">
+            <Button variant="ghost" size="icon" onClick={onEdit} className="h-8 w-8" aria-label={`Edit team ${team.name}`}>
               <Pencil className="h-3.5 w-3.5" />
             </Button>
             {confirmDelete ? (
@@ -403,7 +408,7 @@ function TeamCard({
                 </Button>
               </div>
             ) : (
-              <Button variant="ghost" size="icon" onClick={() => setConfirmDelete(true)} className="h-8 w-8 text-muted-foreground hover:text-destructive">
+              <Button variant="ghost" size="icon" onClick={() => setConfirmDelete(true)} className="h-8 w-8 text-muted-foreground hover:text-destructive" aria-label={`Delete team ${team.name}`}>
                 <Trash2 className="h-3.5 w-3.5" />
               </Button>
             )}

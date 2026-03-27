@@ -21,6 +21,7 @@ import {
   Wand2,
   RotateCw,
 } from "lucide-react";
+import { toast } from "sonner";
 
 export default function SettingsPage() {
   const [settings, setSettings] = useState<Settings | null>(null);
@@ -95,9 +96,11 @@ export default function SettingsPage() {
       const result = await updateSettings(parsed);
       setSettings(result.settings);
       setRawJson(JSON.stringify(result.settings, null, 2));
+      toast.success("Settings saved");
       setStatus("saved");
       setTimeout(() => setStatus("idle"), 3000);
     } catch (err) {
+      toast.error("Failed to save settings");
       setErrorMsg((err as Error).message);
       setStatus("error");
       setTimeout(() => setStatus("idle"), 5000);

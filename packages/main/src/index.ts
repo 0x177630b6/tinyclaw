@@ -19,6 +19,7 @@ import {
     initQueueDb, getPendingAgents, claimAllPendingMessages,
     completeMessage, failMessage,
     recoverStaleMessages, pruneAckedResponses, pruneCompletedMessages,
+    enqueueResponse,
     closeQueueDb, queueEvents,
     insertAgentMessage,
     startScheduler, stopScheduler,
@@ -47,6 +48,7 @@ async function processMessage(dbMsg: any): Promise<void> {
         messageId: dbMsg.message_id,
         agent: dbMsg.agent ?? undefined,
         fromAgent: dbMsg.from_agent ?? undefined,
+        messageThreadId: dbMsg.message_thread_id ?? undefined,
     };
 
     const { channel, sender, message: rawMessage, messageId, agent: preRoutedAgent } = data;
@@ -130,6 +132,7 @@ async function processMessage(dbMsg: any): Promise<void> {
         await sendDirectResponse(response, {
             channel, sender, senderId: data.senderId,
             messageId, originalMessage: rawMessage, agentId,
+            messageThreadId: data.messageThreadId,
         });
     }
 }
@@ -138,7 +141,7 @@ async function processMessage(dbMsg: any): Promise<void> {
 
 async function sendDirectResponse(
     response: string,
-    ctx: { channel: string; sender: string; senderId?: string | null; messageId: string; originalMessage: string; agentId: string }
+    ctx: { channel: string; sender: string; senderId?: string | null; messageId: string; originalMessage: string; agentId: string; messageThreadId?: number }
 ): Promise<void> {
     await streamResponse(response, {
         channel: ctx.channel,
@@ -147,6 +150,7 @@ async function sendDirectResponse(
         messageId: ctx.messageId,
         originalMessage: ctx.originalMessage,
         agentId: ctx.agentId,
+        messageThreadId: ctx.messageThreadId,
     });
 }
 
@@ -224,8 +228,24 @@ const pollInterval = setInterval(() => processQueue(), 5000);
 
 // Periodic maintenance
 const maintenanceInterval = setInterval(() => {
-    const recovered = recoverStaleMessages();
-    if (recovered > 0) log('INFO', `Recovered ${recovered} stale message(s)`);
+    const staleMessages = recoverStaleMessages();
+    if (staleMessages.length > 0) {
+        log('WARN', `${staleMessages.length} stale message(s) detected — notifying sender(s)`);
+        for (const msg of staleMessages) {
+            const agentLabel = msg.agent ? `@${msg.agent}` : 'the agent';
+            const staleMins = Math.round((Date.now() - msg.updated_at) / 60000);
+            enqueueResponse({
+                channel: msg.channel,
+                sender: msg.sender,
+                senderId: msg.sender_id ?? undefined,
+                message: `⚠️ Your message to ${agentLabel} may not have been processed (stuck for ${staleMins}+ min). Please resend if needed.`,
+                originalMessage: msg.message,
+                messageId: `system_stale_${msg.id}_${Date.now()}`,
+                agent: 'system',
+                messageThreadId: msg.message_thread_id ?? undefined,
+            });
+        }
+    }
     pruneAckedResponses();
     pruneCompletedMessages();
 }, 60 * 1000);

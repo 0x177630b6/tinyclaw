@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback, useRef, useEffect } from "react";
-import { usePolling } from "@/lib/hooks";
+import { useSSEPolling } from "@/lib/hooks";
 import { getAgentLogs } from "@/lib/api";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -99,9 +99,10 @@ export function LogFeedTab({ agentId }: { agentId: string }) {
     return getAgentLogs(agentId, 200);
   }, [agentId]);
 
-  const { data } = usePolling<{ entries: LogEntry[]; total: number }>(
+  const { data } = useSSEPolling<{ entries: LogEntry[]; total: number }>(
     fetchLogs,
-    paused ? 0 : 3000,
+    paused ? 0 : 30000,
+    ["agent:response", "message:done"],
     [agentId, paused]
   );
 

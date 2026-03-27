@@ -3,6 +3,7 @@ import path from 'path';
 import { Hono } from 'hono';
 import { TINYAGI_HOME } from '@tinyagi/core';
 import { log } from '@tinyagi/core';
+import { broadcastChange } from '../sse';
 
 type TaskStatus = 'backlog' | 'in_progress' | 'review' | 'done';
 
@@ -61,6 +62,7 @@ app.post('/api/tasks', async (c) => {
     tasks.push(task);
     writeTasks(tasks);
     log('INFO', `[API] Task created: ${task.title}`);
+    broadcastChange('tasks:changed');
     return c.json({ ok: true, task });
 });
 
@@ -81,6 +83,7 @@ app.put('/api/tasks/reorder', async (c) => {
         }
     }
     writeTasks(tasks);
+    broadcastChange('tasks:changed');
     return c.json({ ok: true });
 });
 
@@ -94,6 +97,7 @@ app.put('/api/tasks/:id', async (c) => {
     tasks[idx] = { ...tasks[idx], ...body, id: taskId, updatedAt: Date.now() };
     writeTasks(tasks);
     log('INFO', `[API] Task updated: ${taskId}`);
+    broadcastChange('tasks:changed');
     return c.json({ ok: true, task: tasks[idx] });
 });
 
@@ -106,6 +110,7 @@ app.delete('/api/tasks/:id', (c) => {
     tasks.splice(idx, 1);
     writeTasks(tasks);
     log('INFO', `[API] Task deleted: ${taskId}`);
+    broadcastChange('tasks:changed');
     return c.json({ ok: true });
 });
 

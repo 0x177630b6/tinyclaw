@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useMemo } from "react";
 import type { UniqueIdentifier } from "@dnd-kit/core";
-import { usePolling } from "@/lib/hooks";
+import { usePolling, useSSEPolling } from "@/lib/hooks";
 import {
   getTasks, reorderTasks, sendMessage,
   getAgents, getTeams, getProjects,
@@ -14,6 +14,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ClipboardList, Plus } from "lucide-react";
+import { toast } from "sonner";
 import {
   TaskCard,
   TaskCardOverlay,
@@ -29,10 +30,10 @@ const COLUMNS: { id: TaskStatus; label: string; color: string }[] = [
 ];
 
 export default function TasksPage() {
-  const { data: tasks, refresh } = usePolling<Task[]>(getTasks, 3000);
+  const { data: tasks, refresh } = useSSEPolling<Task[]>(getTasks, 30000, ["tasks:changed"]);
   const { data: agents } = usePolling<Record<string, AgentConfig>>(getAgents, 0);
   const { data: teams } = usePolling<Record<string, TeamConfig>>(getTeams, 0);
-  const { data: projects } = usePolling<Project[]>(getProjects, 5000);
+  const { data: projects } = useSSEPolling<Project[]>(getProjects, 30000, ["projects:changed"]);
 
   const [creating, setCreating] = useState(false);
   const [editingTask, setEditingTask] = useState<Task | null>(null);
@@ -67,10 +68,13 @@ export default function TasksPage() {
           const msg = `@${task.assignee} ${task.title}${task.description ? "\n\n" + task.description : ""}\n\n[task:${task.id}]`;
           await sendMessage({ message: msg, sender: "Web", channel: "web" });
         }
+        if (newlyInProgress.length > 0) {
+          toast.success("Task assigned");
+        }
         await reorderTasks(colMap);
         refresh();
       } catch {
-        // Ignore — will refresh on next poll
+        toast.error("Failed to update task");
       }
     },
     [refresh, columns]
@@ -81,9 +85,10 @@ export default function TasksPage() {
       const { deleteTask } = await import("@/lib/api");
       try {
         await deleteTask(id);
+        toast.success("Task deleted");
         refresh();
       } catch {
-        // Ignore
+        toast.error("Failed to delete task");
       }
     },
     [refresh]
@@ -97,9 +102,10 @@ export default function TasksPage() {
       try {
         await send({ message: msg, sender: "Web", channel: "web" });
         await updateTask(task.id, { status: "in_progress" });
+        toast.success("Task assigned");
         refresh();
       } catch {
-        // Ignore
+        toast.error("Failed to update task");
       }
     },
     [refresh]

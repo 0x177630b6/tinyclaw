@@ -11,6 +11,11 @@ export function broadcastSSE(event: string, data: unknown): void {
     }
 }
 
+/** Convenience: broadcast a typed change event with a timestamp. */
+export function broadcastChange(event: string): void {
+    broadcastSSE(event, { type: event, timestamp: Date.now() });
+}
+
 export function addSSEClient(res: http.ServerResponse): void {
     sseClients.add(res);
 }

@@ -74,6 +74,13 @@ export function initQueueDb(): void {
     if (msgCols.some(c => c.name === 'conversation_id')) {
         db.exec('ALTER TABLE messages DROP COLUMN conversation_id');
     }
+    if (!msgCols.some(c => c.name === 'message_thread_id')) {
+        db.exec('ALTER TABLE messages ADD COLUMN message_thread_id INTEGER');
+    }
+    const respCols2 = db.prepare("PRAGMA table_info(responses)").all() as { name: string }[];
+    if (!respCols2.some(c => c.name === 'message_thread_id')) {
+        db.exec('ALTER TABLE responses ADD COLUMN message_thread_id INTEGER');
+    }
 }
 
 function getDb(): Database.Database {
@@ -87,10 +94,10 @@ export function enqueueMessage(data: MessageJobData): number | null {
     const now = Date.now();
     try {
         const r = getDb().prepare(
-            `INSERT INTO messages (message_id,channel,sender,sender_id,message,agent,from_agent,status,created_at,updated_at)
-             VALUES (?,?,?,?,?,?,?,'pending',?,?)`
+            `INSERT INTO messages (message_id,channel,sender,sender_id,message,agent,from_agent,message_thread_id,status,created_at,updated_at)
+             VALUES (?,?,?,?,?,?,?,?,'pending',?,?)`
         ).run(data.messageId, data.channel, data.sender, data.senderId ?? null, data.message,
-            data.agent ?? null, data.fromAgent ?? null, now, now);
+            data.agent ?? null, data.fromAgent ?? null, data.messageThreadId ?? null, now, now);
         queueEvents.emit('message:enqueued', { id: r.lastInsertRowid, agent: data.agent });
         return r.lastInsertRowid as number;
     } catch (err: any) {
@@ -134,20 +141,29 @@ export function failMessage(rowId: number, error: string): void {
         .run(newStatus, msg.retry_count + 1, error, Date.now(), rowId);
 }
 
-export function recoverStaleMessages(thresholdMs = 10 * 60 * 1000): number {
-    return getDb().prepare(`UPDATE messages SET status='pending',updated_at=? WHERE status='processing' AND updated_at<?`)
-        .run(Date.now(), Date.now() - thresholdMs).changes;
+export function recoverStaleMessages(thresholdMs = 10 * 60 * 1000): any[] {
+    const d = getDb();
+    const now = Date.now();
+    const stale = d.prepare(
+        `SELECT * FROM messages WHERE status='processing' AND updated_at<?`
+    ).all(now - thresholdMs) as any[];
+    if (stale.length === 0) return [];
+    const ids = stale.map((r: any) => r.id);
+    d.prepare(
+        `UPDATE messages SET status='completed',updated_at=? WHERE id IN (${ids.map(() => '?').join(',')})`
+    ).run(now, ...ids);
+    return stale;
 }
 
 // ── Responses ───────────────────────────────────────────────────────────────
 
 export function enqueueResponse(data: ResponseJobData): number {
     const r = getDb().prepare(
-        `INSERT INTO responses (message_id,channel,sender,sender_id,message,original_message,agent,files,metadata,status,created_at)
-         VALUES (?,?,?,?,?,?,?,?,?,'pending',?)`
+        `INSERT INTO responses (message_id,channel,sender,sender_id,message,original_message,agent,files,metadata,message_thread_id,status,created_at)
+         VALUES (?,?,?,?,?,?,?,?,?,?,'pending',?)`
     ).run(data.messageId, data.channel, data.sender, data.senderId ?? null, data.message,
         data.originalMessage, data.agent ?? null, data.files ? JSON.stringify(data.files) : null,
-        data.metadata ? JSON.stringify(data.metadata) : null, Date.now());
+        data.metadata ? JSON.stringify(data.metadata) : null, data.messageThreadId ?? null, Date.now());
     return r.lastInsertRowid as number;
 }
 

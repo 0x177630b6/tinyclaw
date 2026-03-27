@@ -7,6 +7,7 @@ import { AgentConfig, CustomProvider } from '@tinyagi/core';
 import { getSettings, getAgents, ensureAgentDirectory } from '@tinyagi/core';
 import { log } from '@tinyagi/core';
 import { mutateSettings } from './settings';
+import { broadcastChange } from '../sse';
 
 const app = new Hono();
 const execFileAsync = promisify(execFile);
@@ -78,6 +79,7 @@ app.put('/api/agents/:id', async (c) => {
     }
 
     log('INFO', `[API] Agent '${agentId}' saved`);
+    broadcastChange('agents:changed');
     return c.json({
         ok: true,
         agent: settings.agents![agentId],
@@ -94,6 +96,7 @@ app.delete('/api/agents/:id', (c) => {
     }
     mutateSettings(s => { delete s.agents![agentId]; });
     log('INFO', `[API] Agent '${agentId}' deleted`);
+    broadcastChange('agents:changed');
     return c.json({ ok: true });
 });
 

@@ -3,6 +3,7 @@ import path from 'path';
 import { Hono } from 'hono';
 import { TINYAGI_HOME } from '@tinyagi/core';
 import { log } from '@tinyagi/core';
+import { broadcastChange } from '../sse';
 
 type ProjectStatus = 'active' | 'archived';
 
@@ -55,6 +56,7 @@ app.post('/api/projects', async (c) => {
     projects.push(project);
     writeProjects(projects);
     log('INFO', `[API] Project created: ${project.name}`);
+    broadcastChange('projects:changed');
     return c.json({ ok: true, project });
 });
 
@@ -68,6 +70,7 @@ app.put('/api/projects/:id', async (c) => {
     projects[idx] = { ...projects[idx], ...body, id: projectId, updatedAt: Date.now() };
     writeProjects(projects);
     log('INFO', `[API] Project updated: ${projectId}`);
+    broadcastChange('projects:changed');
     return c.json({ ok: true, project: projects[idx] });
 });
 
@@ -80,6 +83,7 @@ app.delete('/api/projects/:id', (c) => {
     projects.splice(idx, 1);
     writeProjects(projects);
     log('INFO', `[API] Project deleted: ${projectId}`);
+    broadcastChange('projects:changed');
     return c.json({ ok: true });
 });
 

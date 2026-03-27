@@ -5,6 +5,7 @@ import { Hono } from 'hono';
 import { Settings } from '@tinyagi/core';
 import { SETTINGS_FILE, TINYAGI_HOME, getSettings, ensureAgentDirectory, copyDirSync, SCRIPT_DIR } from '@tinyagi/core';
 import { log } from '@tinyagi/core';
+import { broadcastChange } from '../sse';
 
 /** Read, mutate, and persist settings.json atomically. */
 export function mutateSettings(fn: (settings: Settings) => void): Settings {
@@ -39,6 +40,7 @@ app.put('/api/settings', async (c) => {
     const merged = { ...current, ...body } as Settings;
     fs.writeFileSync(SETTINGS_FILE, JSON.stringify(merged, null, 2) + '\n');
     log('INFO', '[API] Settings updated');
+    broadcastChange('settings:changed');
     return c.json({ ok: true, settings: merged });
 });
 
@@ -94,6 +96,7 @@ app.post('/api/setup', async (c) => {
     }
 
     log('INFO', '[API] Setup complete');
+    broadcastChange('settings:changed');
     return c.json({ ok: true, settings });
 });
 

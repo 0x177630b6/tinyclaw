@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import { subscribeToEvents, type EventData } from "./api";
+import { useSSEInvalidation } from "./use-sse-invalidation";
 
 /** Polls a fetcher at regular intervals. */
 export function usePolling<T>(
@@ -68,6 +69,20 @@ export function useSSE(maxEvents = 100): {
   }, [maxEvents]);
 
   return { events, connected };
+}
+
+/** Polls a fetcher at regular intervals, with instant refresh on SSE events. */
+export function useSSEPolling<T>(
+  fetcher: () => Promise<T>,
+  fallbackIntervalMs: number,
+  sseEventTypes: string[],
+  deps: unknown[] = []
+): { data: T | null; error: string | null; loading: boolean; refresh: () => void } {
+  const polling = usePolling<T>(fetcher, fallbackIntervalMs, deps);
+
+  useSSEInvalidation(sseEventTypes, polling.refresh);
+
+  return polling;
 }
 
 /** Format a timestamp to relative time. */

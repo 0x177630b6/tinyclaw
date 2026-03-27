@@ -2,7 +2,7 @@
 
 import { useState, useCallback } from "react";
 import Link from "next/link";
-import { usePolling } from "@/lib/hooks";
+import { useSSEPolling } from "@/lib/hooks";
 import {
   getProjects, createProject, updateProject, deleteProject,
   getTasks,
@@ -17,10 +17,11 @@ import {
   FolderKanban, Plus, Pencil, Trash2, X, Check, Loader2,
   ClipboardList, Archive, ArrowRight,
 } from "lucide-react";
+import { toast } from "sonner";
 
 export default function ProjectsPage() {
-  const { data: projects, refresh } = usePolling<Project[]>(getProjects, 3000);
-  const { data: tasks } = usePolling<Task[]>(getTasks, 5000);
+  const { data: projects, refresh } = useSSEPolling<Project[]>(getProjects, 30000, ["projects:changed"]);
+  const { data: tasks } = useSSEPolling<Task[]>(getTasks, 30000, ["tasks:changed"]);
 
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<string | null>(null);
@@ -69,9 +70,11 @@ export default function ProjectsPage() {
       } else {
         await createProject({ name: form.name.trim(), description: form.description.trim() });
       }
+      toast.success(editing ? "Project updated" : "Project created");
       cancel();
       refresh();
     } catch (err) {
+      toast.error("Failed to save project");
       setError((err as Error).message);
     } finally {
       setSaving(false);
@@ -82,8 +85,10 @@ export default function ProjectsPage() {
     setDeleting(id);
     try {
       await deleteProject(id);
+      toast.success("Project deleted");
       refresh();
     } catch (err) {
+      toast.error("Failed to delete project");
       setError((err as Error).message);
     } finally {
       setDeleting(null);
@@ -95,9 +100,10 @@ export default function ProjectsPage() {
       await updateProject(project.id, {
         status: project.status === "archived" ? "active" : "archived",
       });
+      toast.success(project.status === "archived" ? "Project unarchived" : "Project archived");
       refresh();
     } catch {
-      // ignore
+      toast.error("Failed to archive project");
     }
   }, [refresh]);
 
@@ -292,10 +298,10 @@ function ProjectCard({
                 {activeTaskCount} active
               </Badge>
             )}
-            <Button variant="ghost" size="icon" onClick={onArchive} className="h-8 w-8" title={project.status === "archived" ? "Unarchive" : "Archive"}>
+            <Button variant="ghost" size="icon" onClick={onArchive} className="h-8 w-8" title={project.status === "archived" ? "Unarchive" : "Archive"} aria-label={project.status === "archived" ? `Unarchive project ${project.name}` : `Archive project ${project.name}`}>
               <Archive className="h-3.5 w-3.5" />
             </Button>
-            <Button variant="ghost" size="icon" onClick={onEdit} className="h-8 w-8">
+            <Button variant="ghost" size="icon" onClick={onEdit} className="h-8 w-8" aria-label={`Edit project ${project.name}`}>
               <Pencil className="h-3.5 w-3.5" />
             </Button>
             {confirmDelete ? (
@@ -314,7 +320,7 @@ function ProjectCard({
                 </Button>
               </div>
             ) : (
-              <Button variant="ghost" size="icon" onClick={() => setConfirmDelete(true)} className="h-8 w-8 text-muted-foreground hover:text-destructive">
+              <Button variant="ghost" size="icon" onClick={() => setConfirmDelete(true)} className="h-8 w-8 text-muted-foreground hover:text-destructive" aria-label={`Delete project ${project.name}`}>
                 <Trash2 className="h-3.5 w-3.5" />
               </Button>
             )}
