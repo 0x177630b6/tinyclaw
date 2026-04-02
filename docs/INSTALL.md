@@ -135,6 +135,72 @@ You'll configure:
 
 Follow the prompts and you're ready!
 
+## Multi-Instance (Profiles)
+
+You can run multiple TinyAGI instances side-by-side, each with its own bot, settings, database, and tmux session. This is useful for running separate Telegram bots (e.g. one for personal use, one for a project).
+
+### Quick start
+
+```bash
+# First run creates ~/.tinyagi-bot2/ with a template profile.env
+tinyagi --profile bot2 start
+
+# Edit the profile to set your second bot's token and avoid port conflicts
+nano ~/.tinyagi-bot2/profile.env
+```
+
+### Profile environment file
+
+Each profile gets a `profile.env` file in its home directory. Uncomment and set the values you need:
+
+```bash
+# ~/.tinyagi-bot2/profile.env
+TINYAGI_API_PORT=3778
+WHISPER_SERVICE_PORT=7379
+TELEGRAM_BOT_TOKEN=your_second_bot_token
+```
+
+### What gets isolated
+
+| Resource | Default instance | Profile instance (`bot2`) |
+|----------|------------------|--------------------------|
+| Home directory | `~/.tinyagi/` | `~/.tinyagi-bot2/` |
+| Tmux session | `tinyagi` | `tinyagi-bot2` |
+| Settings | `~/.tinyagi/settings.json` | `~/.tinyagi-bot2/settings.json` |
+| SQLite queue | `~/.tinyagi/tinyagi.db` | `~/.tinyagi-bot2/tinyagi.db` |
+| Logs | `~/.tinyagi/logs/` | `~/.tinyagi-bot2/logs/` |
+| API port | `3777` | Set in `profile.env` |
+
+### Managing profiles
+
+All standard commands accept `--profile`:
+
+```bash
+tinyagi --profile bot2 start
+tinyagi --profile bot2 status
+tinyagi --profile bot2 logs telegram
+tinyagi --profile bot2 attach
+tinyagi --profile bot2 stop
+tinyagi --profile bot2 restart
+```
+
+### Setup for a new profile
+
+1. Create a second Telegram bot via [@BotFather](https://t.me/BotFather)
+2. Start the profile once to create the directory and template:
+   ```bash
+   tinyagi --profile bot2 start
+   ```
+3. Edit `~/.tinyagi-bot2/profile.env` with your token and ports
+4. Run setup to configure channels and agents:
+   ```bash
+   tinyagi --profile bot2 setup
+   ```
+5. Restart to apply:
+   ```bash
+   tinyagi --profile bot2 restart
+   ```
+
 ## Uninstall
 
 To remove TinyAGI:

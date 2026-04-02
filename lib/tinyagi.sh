@@ -11,11 +11,53 @@
 # SCRIPT_DIR = repo root (where bash scripts live)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
+# --- Multi-instance profile support ---
+# Parse --profile <name> from anywhere in the argument list.
+# When set, all state (TINYAGI_HOME, tmux session, ports) is isolated.
+TINYAGI_PROFILE=""
+_filtered_args=()
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --profile)
+            if [ -n "${2:-}" ]; then
+                TINYAGI_PROFILE="$2"
+                shift 2
+            else
+                echo "Error: --profile requires a name"
+                exit 1
+            fi
+            ;;
+        *)
+            _filtered_args+=("$1")
+            shift
+            ;;
+    esac
+done
+set -- "${_filtered_args[@]}"
+
 # TINYAGI_HOME = data directory (settings, queue, logs, etc.)
 # Always defaults to ~/.tinyagi; override via TINYAGI_HOME env var.
-TINYAGI_HOME="${TINYAGI_HOME:-$HOME/.tinyagi}"
+if [ -n "$TINYAGI_PROFILE" ]; then
+    # Profile mode: isolated home, tmux session, and env file
+    TINYAGI_HOME="${TINYAGI_HOME:-$HOME/.tinyagi-${TINYAGI_PROFILE}}"
+    TMUX_SESSION="tinyagi-${TINYAGI_PROFILE}"
 
-TMUX_SESSION="tinyagi"
+    # Load profile-specific env overrides (ports, tokens, etc.)
+    PROFILE_ENV="$TINYAGI_HOME/profile.env"
+    if [ -f "$PROFILE_ENV" ]; then
+        set -a
+        # shellcheck disable=SC1090
+        source "$PROFILE_ENV"
+        set +a
+    fi
+else
+    TINYAGI_HOME="${TINYAGI_HOME:-$HOME/.tinyagi}"
+    TMUX_SESSION="tinyagi"
+fi
+
+export TINYAGI_HOME
+export TINYAGI_PROFILE
+
 LOG_DIR="$TINYAGI_HOME/logs"
 SETTINGS_FILE="$TINYAGI_HOME/settings.json"
 
@@ -323,7 +365,7 @@ case "${1:-}" in
     *)
         local_names=$(IFS='|'; echo "${ALL_CHANNELS[*]}")
         show_banner
-        echo "Usage: $0 {start|stop|restart|status|send|logs|reset <agent_id>|channel|heartbeat|provider|model|agent|team|chatroom|office|pairing|update|version|attach}"
+        echo "Usage: $0 [--profile <name>] {start|stop|restart|status|send|logs|reset <agent_id>|channel|heartbeat|provider|model|agent|team|chatroom|office|pairing|update|version|attach}"
         echo ""
         echo "Commands:"
         echo "  start                    Start TinyAGI"
@@ -369,6 +411,11 @@ case "${1:-}" in
         echo "  $0 send '@dev fix the auth bug'"
         echo "  $0 channels reset whatsapp"
         echo "  $0 logs telegram"
+        echo ""
+        echo "Multi-instance (run a second bot with its own config):"
+        echo "  $0 --profile bot2 start       # creates ~/.tinyagi-bot2/"
+        echo "  $0 --profile bot2 status"
+        echo "  $0 --profile bot2 stop"
         echo ""
         exit 1
         ;;

@@ -24,7 +24,7 @@ const API_BASE = `http://localhost:${API_PORT}`;
 const WHISPER_PORT = parseInt(process.env.WHISPER_SERVICE_PORT || '7378', 10);
 const WHISPER_BASE = `http://127.0.0.1:${WHISPER_PORT}`;
 
-const SCRIPT_DIR = path.resolve(__dirname, '..', '..');
+const SCRIPT_DIR = path.resolve(__dirname, '..', '..', '..');
 const TINYAGI_HOME = process.env.TINYAGI_HOME
     || path.join(require('os').homedir(), '.tinyagi');
 const LOG_FILE = path.join(TINYAGI_HOME, 'logs/telegram.log');

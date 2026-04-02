@@ -264,18 +264,33 @@ function delegateToBash(args, opts = {}) {
         process.exit(1);
     }
 
+    // Prepend --profile args so tinyagi.sh sees them first
+    const fullArgs = [...profileArgs, ...args];
+
     if (opts.sync) {
-        execSync(`"${tinyagiSh}" ${args.map(a => `"${a}"`).join(' ')}`, { stdio: 'inherit' });
+        execSync(`"${tinyagiSh}" ${fullArgs.map(a => `"${a}"`).join(' ')}`, { stdio: 'inherit' });
     } else {
-        const child = spawn(tinyagiSh, args, { stdio: 'inherit' });
+        const child = spawn(tinyagiSh, fullArgs, { stdio: 'inherit' });
         child.on('exit', (code) => process.exit(code || 0));
     }
 }
 
 // ── CLI Dispatch ─────────────────────────────────────────────────────────────
 
-const command = process.argv[2] || 'run';
-const restArgs = process.argv.slice(3);
+// Extract --profile <name> from argv so it can be forwarded to tinyagi.sh
+let profileArgs = [];
+const filteredArgv = [];
+for (let i = 2; i < process.argv.length; i++) {
+    if (process.argv[i] === '--profile' && process.argv[i + 1]) {
+        profileArgs = ['--profile', process.argv[i + 1]];
+        i++; // skip the profile name
+    } else {
+        filteredArgv.push(process.argv[i]);
+    }
+}
+
+const command = filteredArgv[0] || 'run';
+const restArgs = filteredArgv.slice(1);
 
 // Commands that tinyagi handles directly
 switch (command) {
@@ -351,6 +366,10 @@ switch (command) {
         console.log('  pairing                  Manage sender approvals');
         console.log('  update                   Update TinyAGI to latest version');
         console.log('  version                  Show current version');
+        console.log('');
+        console.log('Multi-instance:');
+        console.log('  --profile <name>         Run with an isolated profile (separate home, session, ports)');
+        console.log('  Example: tinyagi --profile bot2 start');
         console.log('');
         break;
 

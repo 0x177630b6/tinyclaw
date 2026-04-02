@@ -43,11 +43,44 @@ start_daemon() {
     done
 
     if session_exists; then
-        echo -e "${YELLOW}Session already running${NC}"
+        echo -e "${YELLOW}Session already running${NC} (${TMUX_SESSION})"
         return 1
     fi
 
     show_banner
+
+    # Profile banner
+    if [ -n "${TINYAGI_PROFILE:-}" ]; then
+        echo -e "${BLUE}Profile: ${GREEN}${TINYAGI_PROFILE}${NC}"
+        echo -e "${BLUE}Home:    ${NC}${TINYAGI_HOME}"
+        echo -e "${BLUE}Session: ${NC}${TMUX_SESSION}"
+        echo ""
+
+        # Create profile.env template on first run
+        local profile_env="$TINYAGI_HOME/profile.env"
+        if [ ! -f "$profile_env" ]; then
+            mkdir -p "$TINYAGI_HOME"
+            cat > "$profile_env" <<'ENVEOF'
+# TinyAGI Profile Environment
+# Customize ports and tokens for this instance.
+# Uncomment and edit as needed.
+
+# API server port (default: 3777)
+# TINYAGI_API_PORT=3778
+
+# Whisper transcription port (default: 7378)
+# WHISPER_SERVICE_PORT=7379
+
+# Bot tokens — set these for the channels this profile uses
+# TELEGRAM_BOT_TOKEN=your_token_here
+# DISCORD_BOT_TOKEN=your_token_here
+ENVEOF
+            echo -e "${YELLOW}Created ${profile_env}${NC}"
+            echo "  Edit this file to set bot tokens and ports for this profile."
+            echo ""
+        fi
+    fi
+
     log "Starting TinyAGI daemon..."
 
     # Check dependencies
@@ -190,23 +223,33 @@ start_daemon() {
     # shell and exit silently. See: https://github.com/TinyAGI/tinyagi/issues/156
     sleep 2
 
+    # Build env prefix for child processes (multi-instance isolation)
+    local env_prefix=""
+    env_prefix="TINYAGI_HOME='${TINYAGI_HOME}'"
+    if [ -n "${TINYAGI_API_PORT:-}" ]; then
+        env_prefix="$env_prefix TINYAGI_API_PORT='${TINYAGI_API_PORT}'"
+    fi
+    if [ -n "${WHISPER_SERVICE_PORT:-}" ]; then
+        env_prefix="$env_prefix WHISPER_SERVICE_PORT='${WHISPER_SERVICE_PORT}'"
+    fi
+
     # Assign channel panes
     local pane_idx=$pane_base
     local whatsapp_pane=-1
     for ch in "${ACTIVE_CHANNELS[@]}"; do
         [ "$ch" = "whatsapp" ] && whatsapp_pane=$pane_idx
-        tmux send-keys -t "$TMUX_SESSION:${win_base}.$pane_idx" "cd '$SCRIPT_DIR' && node $(channel_script "$ch")" C-m
+        tmux send-keys -t "$TMUX_SESSION:${win_base}.$pane_idx" "cd '$SCRIPT_DIR' && $env_prefix node $(channel_script "$ch")" C-m
         tmux select-pane -t "$TMUX_SESSION:${win_base}.$pane_idx" -T "$(channel_display "$ch")"
         pane_idx=$((pane_idx + 1))
     done
 
     # Queue pane
-    tmux send-keys -t "$TMUX_SESSION:${win_base}.$pane_idx" "cd '$SCRIPT_DIR' && node packages/main/dist/index.js" C-m
+    tmux send-keys -t "$TMUX_SESSION:${win_base}.$pane_idx" "cd '$SCRIPT_DIR' && $env_prefix node packages/main/dist/index.js" C-m
     tmux select-pane -t "$TMUX_SESSION:${win_base}.$pane_idx" -T "Queue"
     pane_idx=$((pane_idx + 1))
 
     # Heartbeat pane
-    tmux send-keys -t "$TMUX_SESSION:${win_base}.$pane_idx" "cd '$SCRIPT_DIR' && ./lib/heartbeat-cron.sh" C-m
+    tmux send-keys -t "$TMUX_SESSION:${win_base}.$pane_idx" "cd '$SCRIPT_DIR' && $env_prefix ./lib/heartbeat-cron.sh" C-m
     tmux select-pane -t "$TMUX_SESSION:${win_base}.$pane_idx" -T "Heartbeat"
 
     echo ""
@@ -304,7 +347,14 @@ _start_server_only() {
     pane_base=$(tmux show-option -gv pane-base-index 2>/dev/null || echo 0)
 
     sleep 2
-    tmux send-keys -t "$TMUX_SESSION:${win_base}.$pane_base" "cd '$SCRIPT_DIR' && node packages/main/dist/index.js" C-m
+
+    # Build env prefix for child processes (multi-instance isolation)
+    local env_prefix="TINYAGI_HOME='${TINYAGI_HOME}'"
+    if [ -n "${TINYAGI_API_PORT:-}" ]; then
+        env_prefix="$env_prefix TINYAGI_API_PORT='${TINYAGI_API_PORT}'"
+    fi
+
+    tmux send-keys -t "$TMUX_SESSION:${win_base}.$pane_base" "cd '$SCRIPT_DIR' && $env_prefix node packages/main/dist/index.js" C-m
     tmux select-pane -t "$TMUX_SESSION:${win_base}.$pane_base" -T "Queue"
 
     echo -e "${GREEN}✓ TinyAGI started (setup mode — no channels)${NC}"
@@ -371,6 +421,15 @@ start_channel() {
         fi
     fi
 
+    # Build env prefix for child processes (multi-instance isolation)
+    local env_prefix="TINYAGI_HOME='${TINYAGI_HOME}'"
+    if [ -n "${TINYAGI_API_PORT:-}" ]; then
+        env_prefix="$env_prefix TINYAGI_API_PORT='${TINYAGI_API_PORT}'"
+    fi
+    if [ -n "${WHISPER_SERVICE_PORT:-}" ]; then
+        env_prefix="$env_prefix WHISPER_SERVICE_PORT='${WHISPER_SERVICE_PORT}'"
+    fi
+
     # Add pane
     tmux split-window -t "$TMUX_SESSION" -c "$SCRIPT_DIR"
     tmux select-layout -t "$TMUX_SESSION" tiled
@@ -378,7 +437,7 @@ start_channel() {
     # Find the newest pane (highest id) — that's the one we just created
     local new_pane
     new_pane=$(tmux list-panes -t "$TMUX_SESSION" -F '#{pane_id}' | tail -1)
-    tmux send-keys -t "$new_pane" "cd '$SCRIPT_DIR' && node $(channel_script "$channel")" C-m
+    tmux send-keys -t "$new_pane" "cd '$SCRIPT_DIR' && $env_prefix node $(channel_script "$channel")" C-m
     tmux select-pane -t "$new_pane" -T "$(channel_display "$channel")"
 
     echo -e "${GREEN}✓ $(channel_display "$channel") started${NC}"
@@ -430,12 +489,18 @@ start_heartbeat() {
         return 0
     fi
 
+    # Build env prefix for child processes (multi-instance isolation)
+    local env_prefix="TINYAGI_HOME='${TINYAGI_HOME}'"
+    if [ -n "${TINYAGI_API_PORT:-}" ]; then
+        env_prefix="$env_prefix TINYAGI_API_PORT='${TINYAGI_API_PORT}'"
+    fi
+
     tmux split-window -t "$TMUX_SESSION" -c "$SCRIPT_DIR"
     tmux select-layout -t "$TMUX_SESSION" tiled
     sleep 1
     local new_pane
     new_pane=$(tmux list-panes -t "$TMUX_SESSION" -F '#{pane_id}' | tail -1)
-    tmux send-keys -t "$new_pane" "cd '$SCRIPT_DIR' && ./lib/heartbeat-cron.sh" C-m
+    tmux send-keys -t "$new_pane" "cd '$SCRIPT_DIR' && $env_prefix ./lib/heartbeat-cron.sh" C-m
     tmux select-pane -t "$new_pane" -T "Heartbeat"
 
     echo -e "${GREEN}✓ Heartbeat started${NC}"
@@ -465,25 +530,31 @@ stop_heartbeat() {
 
 # Stop daemon
 stop_daemon() {
-    log "Stopping TinyAGI..."
+    local profile_label=""
+    [ -n "${TINYAGI_PROFILE:-}" ] && profile_label=" (profile: ${TINYAGI_PROFILE})"
+    log "Stopping TinyAGI${profile_label}..."
 
     if session_exists; then
         tmux kill-session -t "$TMUX_SESSION"
     fi
 
     # Kill any remaining channel processes
+    # In profile mode, only kill processes whose TINYAGI_HOME matches this instance
     for ch in "${ALL_CHANNELS[@]}"; do
         pkill -f "$(channel_script "$ch")" || true
     done
     pkill -f "packages/main/dist/index.js" || true
     pkill -f "heartbeat-cron.sh" || true
 
-    echo -e "${GREEN}✓ TinyAGI stopped${NC}"
+    echo -e "${GREEN}✓ TinyAGI stopped${NC}${profile_label}"
     log "Daemon stopped"
 }
 
 # Restart daemon safely even when called from inside TinyAGI's tmux session
 restart_daemon() {
+    local profile_args=""
+    [ -n "${TINYAGI_PROFILE:-}" ] && profile_args="--profile ${TINYAGI_PROFILE}"
+
     if session_exists && [ -n "${TMUX:-}" ]; then
         local current_session
         current_session=$(tmux display-message -p '#S' 2>/dev/null || true)
@@ -491,7 +562,7 @@ restart_daemon() {
             local bash_bin
             bash_bin=$(command -v bash)
             log "Restart requested from inside tmux session; scheduling detached restart..."
-            nohup "$bash_bin" "$SCRIPT_DIR/lib/tinyagi.sh" __delayed_start >/dev/null 2>&1 &
+            nohup "$bash_bin" "$SCRIPT_DIR/lib/tinyagi.sh" $profile_args __delayed_start >/dev/null 2>&1 &
             stop_daemon
             return
         fi
@@ -509,12 +580,18 @@ status_daemon() {
     echo "==============="
     echo ""
 
+    if [ -n "${TINYAGI_PROFILE:-}" ]; then
+        echo -e "Profile:      ${GREEN}${TINYAGI_PROFILE}${NC}"
+        echo -e "Home:         ${TINYAGI_HOME}"
+        echo ""
+    fi
+
     if session_exists; then
-        echo -e "Tmux Session: ${GREEN}Running${NC}"
+        echo -e "Tmux Session: ${GREEN}Running${NC} (${TMUX_SESSION})"
         echo "  Attach: tmux attach -t $TMUX_SESSION"
     else
-        echo -e "Tmux Session: ${RED}Not Running${NC}"
-        echo "  Start: tinyagi start"
+        echo -e "Tmux Session: ${RED}Not Running${NC} (${TMUX_SESSION})"
+        echo "  Start: tinyagi start${TINYAGI_PROFILE:+ --profile $TINYAGI_PROFILE}"
     fi
 
     echo ""

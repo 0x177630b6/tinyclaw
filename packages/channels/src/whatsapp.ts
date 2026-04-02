@@ -16,7 +16,7 @@ import { applyDefaultAgent } from './default-agent';
 const API_PORT = parseInt(process.env.TINYAGI_API_PORT || '3777', 10);
 const API_BASE = `http://localhost:${API_PORT}`;
 
-const SCRIPT_DIR = path.resolve(__dirname, '..', '..');
+const SCRIPT_DIR = path.resolve(__dirname, '..', '..', '..');
 const TINYAGI_HOME = process.env.TINYAGI_HOME
     || path.join(require('os').homedir(), '.tinyagi');
 const LOG_FILE = path.join(TINYAGI_HOME, 'logs/whatsapp.log');

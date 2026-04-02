@@ -387,6 +387,56 @@ cp -r ~/.tinyagi/backups/$BACKUP_DIR/* $HOME/tinyagi/
 tinyagi restart
 ```
 
+## Multi-Instance / Profile Issues
+
+### Port conflict between instances
+
+If a second instance fails to start with "address already in use":
+
+```bash
+# Check what's using the port
+lsof -i :3777
+
+# Edit the profile's env file to use a different port
+nano ~/.tinyagi-bot2/profile.env
+# Set: TINYAGI_API_PORT=3778
+```
+
+Each profile instance needs unique values for `TINYAGI_API_PORT` and `WHISPER_SERVICE_PORT`.
+
+### Telegram 409 conflict error
+
+If you see `ETELEGRAM 409` in the logs, two processes are polling with the same bot token. Each Telegram bot token can only have one active polling connection.
+
+**Solution:** Ensure each profile uses a different `TELEGRAM_BOT_TOKEN` in its `profile.env`.
+
+### Profile not loading settings
+
+If `tinyagi --profile bot2 status` shows no channels:
+
+1. Check the profile home directory exists:
+   ```bash
+   ls ~/.tinyagi-bot2/
+   ```
+
+2. Check settings exist:
+   ```bash
+   cat ~/.tinyagi-bot2/settings.json | jq
+   ```
+
+3. Run setup for the profile:
+   ```bash
+   tinyagi --profile bot2 setup
+   ```
+
+### Wrong instance stopping
+
+`tinyagi stop` (without `--profile`) only stops the default instance. To stop a specific profile:
+
+```bash
+tinyagi --profile bot2 stop
+```
+
 ## Performance Issues
 
 ### High CPU usage

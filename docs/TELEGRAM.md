@@ -112,3 +112,28 @@ Usage data is persisted to `~/.tinyagi/usage/<agentId>.json` and reset when you 
 - `/clear` resets the current topic's agent session (next message starts fresh)
 - `/reset @agent1 @agent2` resets specific agents by name
 - Both commands clear the usage data so `/context` shows accurate post-reset numbers
+
+## Running Multiple Telegram Bots
+
+You can run a second (or third, etc.) Telegram bot by using TinyAGI's profile system. Each profile gets its own isolated home directory, database, settings, and tmux session.
+
+```bash
+# 1. Create a new bot via @BotFather, copy the token
+
+# 2. Start the profile (creates ~/.tinyagi-bot2/ on first run)
+tinyagi --profile bot2 start
+
+# 3. Edit the profile env file with the new bot token and unique ports
+#    ~/.tinyagi-bot2/profile.env:
+TELEGRAM_BOT_TOKEN=123456:ABC-your-second-token
+TINYAGI_API_PORT=3778
+WHISPER_SERVICE_PORT=7379
+
+# 4. Configure channels/agents for this profile
+tinyagi --profile bot2 setup
+
+# 5. Restart to apply
+tinyagi --profile bot2 restart
+```
+
+Each instance runs completely independently — separate queue, agents, logs, and Telegram polling connection. See [INSTALL.md](INSTALL.md#multi-instance-profiles) for full details.
