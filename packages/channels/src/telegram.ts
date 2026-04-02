@@ -17,8 +17,12 @@ import { ensureSenderPaired, genId } from '@tinyagi/core';
 import { createSSEClient } from './sse-client';
 import { applyDefaultAgent } from './default-agent';
 
+import { spawn, ChildProcess } from 'child_process';
+
 const API_PORT = parseInt(process.env.TINYAGI_API_PORT || '3777', 10);
 const API_BASE = `http://localhost:${API_PORT}`;
+const WHISPER_PORT = parseInt(process.env.WHISPER_SERVICE_PORT || '7378', 10);
+const WHISPER_BASE = `http://127.0.0.1:${WHISPER_PORT}`;
 
 const SCRIPT_DIR = path.resolve(__dirname, '..', '..');
 const TINYAGI_HOME = process.env.TINYAGI_HOME
@@ -116,6 +120,56 @@ const pendingMessages = new Map<string, PendingMessage>();
 let processingOutgoingQueue = false;
 let lastPollingActivity = Date.now();
 let pollingRestartInProgress = false;
+
+// ── Whisper transcription service ────────────────────────────────────────────
+let whisperProcess: ChildProcess | null = null;
+
+function startWhisperService(): void {
+    const scriptPath = path.join(SCRIPT_DIR, 'scripts', 'whisper-service.py');
+    if (!fs.existsSync(scriptPath)) {
+        log('WARN', 'Whisper service script not found, voice transcription disabled');
+        return;
+    }
+    whisperProcess = spawn('python3', [scriptPath, '--port', String(WHISPER_PORT)], {
+        stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    whisperProcess.stdout?.on('data', (data: Buffer) => {
+        log('INFO', `[whisper] ${data.toString().trim()}`);
+    });
+    whisperProcess.stderr?.on('data', (data: Buffer) => {
+        log('WARN', `[whisper] ${data.toString().trim()}`);
+    });
+    whisperProcess.on('exit', (code) => {
+        log('WARN', `Whisper service exited with code ${code}`);
+        whisperProcess = null;
+    });
+    log('INFO', 'Starting whisper transcription service...');
+}
+
+async function transcribeVoiceMessage(filePath: string): Promise<string | null> {
+    try {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 120000);
+        const res = await fetch(`${WHISPER_BASE}/transcribe`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ file: filePath }),
+            signal: controller.signal,
+        });
+        clearTimeout(timeout);
+        if (!res.ok) {
+            const err = await res.text();
+            log('WARN', `Whisper transcription failed (${res.status}): ${err}`);
+            return null;
+        }
+        const data = await res.json() as { text: string; language: string; duration: number };
+        log('INFO', `Transcribed voice (${data.duration}s, lang=${data.language}): ${data.text.substring(0, 80)}...`);
+        return data.text;
+    } catch (err) {
+        log('WARN', `Whisper transcription error: ${(err as Error).message}`);
+        return null;
+    }
+}
 
 // Logger
 function log(level: string, message: string): void {
@@ -366,10 +420,22 @@ bot.on('message', async (msg: TelegramBot.Message) => {
             if (filePath) downloadedFiles.push(filePath);
         }
 
-        // Handle voice messages
+        // Handle voice messages — transcribe to text, keep file as reference
         if (msg.voice) {
             const filePath = await downloadTelegramFile(msg.voice.file_id, '.ogg', queueMessageId, `voice_${msg.message_id}.ogg`);
-            if (filePath) downloadedFiles.push(filePath);
+            if (filePath) {
+                downloadedFiles.push(filePath);
+                const transcription = await transcribeVoiceMessage(filePath);
+                if (transcription) {
+                    messageText = messageText
+                        ? `${messageText}\n[voice transcription: ${transcription}]`
+                        : `[voice transcription: ${transcription}]`;
+                } else {
+                    messageText = messageText
+                        ? `${messageText}\n[voice message — transcription unavailable]`
+                        : '[voice message — transcription unavailable]';
+                }
+            }
         }
 
         // Handle video messages
@@ -465,6 +531,7 @@ bot.on('message', async (msg: TelegramBot.Message) => {
                 const settings = JSON.parse(settingsData);
                 const agents = settings.agents || {};
                 const workspacePath = settings?.workspace?.path || path.join(require('os').homedir(), 'tinyagi-workspace');
+                const tinyagiHome = process.env.TINYAGI_HOME || path.join(require('os').homedir(), '.tinyagi');
                 const resetResults: string[] = [];
                 for (const agentId of agentArgs) {
                     if (!agents[agentId]) {
@@ -474,6 +541,7 @@ bot.on('message', async (msg: TelegramBot.Message) => {
                     const flagDir = path.join(workspacePath, agentId);
                     if (!fs.existsSync(flagDir)) fs.mkdirSync(flagDir, { recursive: true });
                     fs.writeFileSync(path.join(flagDir, 'reset_flag'), 'reset');
+                    try { fs.writeFileSync(path.join(tinyagiHome, 'usage', `${agentId}.json`), JSON.stringify({ cleared: true })); } catch { /* ok */ }
                     resetResults.push(`Reset @${agentId} (${agents[agentId].name}).`);
                 }
                 await bot.sendMessage(msg.chat.id, resetResults.join('\n'), cmdOpts());
@@ -484,21 +552,26 @@ bot.on('message', async (msg: TelegramBot.Message) => {
         }
 
         // Check for clear command — reset agent session for this topic
-        if (messageText.trim().match(/^[!/]clear$/i)) {
+        if (messageText.trim().match(/^[!/]clear(@\w+)?$/i)) {
             log('INFO', 'Clear command received');
             try {
-                const chatKey = topicId ? `${senderId}_topic_${topicId}` : senderId;
                 const settingsData = JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8'));
-                const defaults = settingsData.channels?.defaults || {};
-                const agentId = defaults[chatKey];
+                // Resolve agent from topic_agents first, then defaults
+                const agentId = getTopicAgent(SETTINGS_FILE, topicId)
+                    || (settingsData.channels?.defaults || {})[topicId ? `${senderId}_topic_${topicId}` : senderId];
                 if (!agentId) {
                     await bot.sendMessage(msg.chat.id, 'No agent set for this chat. Send @agent_id first.', cmdOpts());
                     return;
                 }
+                // Write reset flag where processMessage checks: workspace/agentId/reset_flag
                 const workspacePath = settingsData?.workspace?.path || path.join(require('os').homedir(), 'tinyagi-workspace');
                 const flagDir = path.join(workspacePath, agentId);
                 if (!fs.existsSync(flagDir)) fs.mkdirSync(flagDir, { recursive: true });
                 fs.writeFileSync(path.join(flagDir, 'reset_flag'), 'reset');
+                // Clear usage file so /context shows "session cleared"
+                const tinyagiHome = process.env.TINYAGI_HOME || path.join(require('os').homedir(), '.tinyagi');
+                const usageFile = path.join(tinyagiHome, 'usage', `${agentId}.json`);
+                try { fs.writeFileSync(usageFile, JSON.stringify({ cleared: true })); } catch { /* ok */ }
                 await bot.sendMessage(msg.chat.id, `Session cleared for @${agentId}. Next message starts a fresh conversation.`, cmdOpts());
             } catch (e) {
                 await bot.sendMessage(msg.chat.id, `Error: ${(e as Error).message}`, cmdOpts());
@@ -507,13 +580,13 @@ bot.on('message', async (msg: TelegramBot.Message) => {
         }
 
         // Check for context command — show context window usage
-        if (messageText.trim().match(/^[!/]context$/i)) {
+        if (messageText.trim().match(/^[!/]context(@\w+)?$/i)) {
             log('INFO', 'Context command received');
             try {
-                const chatKey = topicId ? `${senderId}_topic_${topicId}` : senderId;
                 const settingsData = JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8'));
-                const defaults = settingsData.channels?.defaults || {};
-                const agentId = defaults[chatKey];
+                // Resolve agent from topic_agents first, then defaults
+                const agentId = getTopicAgent(SETTINGS_FILE, topicId)
+                    || (settingsData.channels?.defaults || {})[topicId ? `${senderId}_topic_${topicId}` : senderId];
                 if (!agentId) {
                     await bot.sendMessage(msg.chat.id, 'No agent set for this chat. Send @agent_id first.', cmdOpts());
                     return;
@@ -524,15 +597,16 @@ bot.on('message', async (msg: TelegramBot.Message) => {
                     return;
                 }
                 const usage = await res.json() as any;
-                const pct = usage.contextWindow > 0 ? Math.round((usage.contextUsed / usage.contextWindow) * 100) : 0;
-                const bar = '\u2588'.repeat(Math.round(pct / 5)) + '\u2591'.repeat(20 - Math.round(pct / 5));
+                const rawPct = usage.contextWindow > 0 ? Math.round((usage.contextUsed / usage.contextWindow) * 100) : 0;
+                const pct = Math.min(rawPct, 100);
+                const filled = Math.min(Math.round(pct / 5), 20);
+                const bar = '\u2588'.repeat(filled) + '\u2591'.repeat(20 - filled);
                 const lines = [
                     `@${agentId} — Context Window`,
                     ``,
                     `Model: ${usage.lastModel}`,
-                    `Session: ${usage.sessionId || 'unknown'}`,
                     `Context: ${(usage.contextUsed / 1000).toFixed(1)}K / ${(usage.contextWindow / 1000).toFixed(0)}K tokens`,
-                    `[${bar}] ${pct}%`,
+                    `[${bar}] ${rawPct}%`,
                     `Cost: $${usage.costUSD?.toFixed(4) || '0'}`,
                     usage.numTurns ? `Turns: ${usage.numTurns}` : '',
                 ].filter(Boolean);
@@ -853,15 +927,18 @@ process.on('uncaughtException', (error) => {
 // Graceful shutdown
 process.on('SIGINT', () => {
     log('INFO', 'Shutting down Telegram client...');
+    whisperProcess?.kill();
     bot.stopPolling();
     process.exit(0);
 });
 
 process.on('SIGTERM', () => {
     log('INFO', 'Shutting down Telegram client...');
+    whisperProcess?.kill();
     bot.stopPolling();
     process.exit(0);
 });
 
 // Start
+startWhisperService();
 log('INFO', 'Starting Telegram client...');

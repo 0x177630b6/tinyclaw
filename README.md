@@ -30,7 +30,9 @@
 - ✅ **Team chat rooms** - Persistent async chat rooms per team with real-time CLI viewer
 - ✅ **Multiple AI providers** - Anthropic Claude, OpenAI Codex, and custom providers (any OpenAI/Anthropic-compatible endpoint)
 - ✅ **Auth token management** - Store API keys per provider, no separate CLI auth needed
-- ✅ **Parallel processing** - Agents process messages concurrently
+- ✅ **Voice transcription** - Telegram voice messages auto-transcribed via faster-whisper
+- ✅ **Telegram commands** - `/context`, `/clear`, `/reset`, `/restart` for session management
+- ✅ **Parallel processing** - Agents process messages concurrently (per-agent queue routing)
 - ✅ **Live TUI dashboard** - Real-time team visualizer and chatroom viewer
 - ✅ **Persistent sessions** - Conversation context maintained across restarts
 - ✅ **SQLite queue** - Atomic transactions, retry logic, dead-letter management

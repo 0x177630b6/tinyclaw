@@ -64,6 +64,15 @@ export const claudeAdapter: AgentAdapter = {
                         if (json.modelUsage) {
                             log('INFO', `Claude model usage (${agentId}): ${JSON.stringify(json.modelUsage)}`);
                             emitEvent('usage_stats', { agentId, modelUsage: json.modelUsage });
+                            // Persist usage to file for /context command
+                            try {
+                                const usageDir = path.join(TINYAGI_HOME, 'usage');
+                                fs.mkdirSync(usageDir, { recursive: true });
+                                fs.writeFileSync(path.join(usageDir, `${agentId}.json`), JSON.stringify({
+                                    modelUsage: json.modelUsage,
+                                    updatedAt: Date.now(),
+                                }));
+                            } catch { /* best-effort */ }
                         }
                         return;
                     }

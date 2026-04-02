@@ -88,12 +88,12 @@ export interface ResponseData {
 export const MODEL_ALIASES: Record<string, Record<string, string>> = {
     anthropic: {
         'sonnet': 'claude-sonnet-4-6',
-        'opus': 'claude-opus-4-6',
+        'opus': 'claude-opus-4-6[1m]',
     },
     openai: {},
     opencode: {
         'sonnet': 'opencode/claude-sonnet-4-6',
-        'opus': 'opencode/claude-opus-4-6',
+        'opus': 'opencode/claude-opus-4-6[1m]',
     },
 };
 

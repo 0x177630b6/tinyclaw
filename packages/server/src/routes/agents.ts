@@ -268,6 +268,54 @@ app.get('/api/agents/:id/memory', (c) => {
     return c.json({ index, files, memoryDir });
 });
 
+// GET /api/agents/:id/usage — return latest context/cost from persisted usage file
+app.get('/api/agents/:id/usage', (c) => {
+    const agentId = c.req.param('id');
+    const settings = getSettings();
+    const agents = getAgents(settings);
+    if (!agents[agentId]) return c.json({ error: 'Agent not found' }, 404);
+
+    try {
+        const TINYAGI = process.env.TINYAGI_HOME || path.join(require('os').homedir(), '.tinyagi');
+        const usageFile = path.join(TINYAGI, 'usage', `${agentId}.json`);
+        if (!fs.existsSync(usageFile)) return c.json({ error: 'No usage data yet. Send a message first.' }, 404);
+
+        const data = JSON.parse(fs.readFileSync(usageFile, 'utf8'));
+        if (data.cleared) return c.json({ error: 'Session cleared. Send a message to see usage.' }, 404);
+
+        const modelUsage = data.modelUsage || {};
+
+        // Find the primary model (largest contextWindow) — ignore subagent models
+        let primaryInput = 0, primaryOutput = 0, primaryCacheRead = 0, primaryCacheCreate = 0;
+        let totalCost = 0, lastModel = '', contextWindow = 0;
+        for (const [model, usage] of Object.entries(modelUsage) as [string, any][]) {
+            totalCost += usage.costUSD || 0;
+            if ((usage.contextWindow || 0) >= contextWindow) {
+                primaryInput = usage.inputTokens || 0;
+                primaryOutput = usage.outputTokens || 0;
+                primaryCacheRead = usage.cacheReadInputTokens || 0;
+                primaryCacheCreate = usage.cacheCreationInputTokens || 0;
+                contextWindow = usage.contextWindow || 0;
+                lastModel = model;
+            }
+        }
+        const contextUsed = primaryCacheCreate + primaryInput;
+
+        return c.json({
+            lastModel,
+            contextUsed,
+            contextWindow,
+            costUSD: totalCost,
+            inputTokens: primaryInput,
+            outputTokens: primaryOutput,
+            cacheReadTokens: primaryCacheRead,
+            cacheCreateTokens: primaryCacheCreate,
+        });
+    } catch (e) {
+        return c.json({ error: (e as Error).message }, 500);
+    }
+});
+
 // GET /api/agents/:id/heartbeat — read heartbeat.md and settings from workspace
 app.get('/api/agents/:id/heartbeat', (c) => {
     const agentId = c.req.param('id');
